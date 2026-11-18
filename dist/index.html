@@ -61,6 +61,12 @@ main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:clamp
 .wpill>span:nth-child(2){flex:1}.wpill b{font-variant-numeric:tabular-nums}
 .wpill.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}.wpill.dim{opacity:.4}
 .wpill:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.why{display:flex;gap:10px;align-items:flex-start;margin:8px 0;font-size:15px}
+.topic{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.topic-h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;font-size:17px}
+.flag{font-size:14px;margin:8px 0;padding:8px 10px;border-radius:6px;background:var(--card);border-left:4px solid var(--accent)}
+.flag.opp{border-left-color:var(--disagree)}
+.on-row{background:var(--card);box-shadow:inset 3px 0 0 var(--accent)}
 .seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:10px 0}
 .seg button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:64px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;text-align:left}
 .seg button span{font-size:12px;color:var(--mute);line-height:1.3}
@@ -126,6 +132,7 @@ footer{padding:20px max(4vw,16px) 40px;border-top:1px solid var(--line);font-siz
     <button role="tab" data-tab="ideas" aria-selected="true">1 · Map of ideas</button>
     <button role="tab" data-tab="vote" aria-selected="false">2 · Vote<span class="n" id="voteCount">0</span></button>
     <button role="tab" data-tab="results" aria-selected="false">3 · Where we agree</button>
+    <button role="tab" data-tab="officer" aria-selected="false">Officer view</button>
     <button role="tab" data-tab="how" aria-selected="false">How it works</button>
   </nav>
 </header>
@@ -190,7 +197,9 @@ var PV_DATA = {
     { id: 15, cat: "Services",       x: null, y: null, place: "Whole area", geom: { type: "wide" },
       text: "Publish every Board decision and what it spends, online and in plain English." },
     { id: 16, cat: "Environment",    x: null, y: null, place: "Whole area", geom: { type: "wide" },
-      text: "Set up a community-owned energy scheme with solar panels on public buildings." }
+      text: "Set up a community-owned energy scheme with solar panels on public buildings." },
+    { id: 17, cat: "Services",       x: 238, y: 402, place: "Hollins Park (playground)",
+      text: "Provide public toilets in Hollins Park, open during daylight hours." }
   ],
 
   // The raw map contributions each statement was consolidated from (shown in "How we got here").
@@ -229,15 +238,23 @@ var PV_DATA = {
     [15, null, null, "nobody knows what the board actually decides or spends"],
     [15, null, null, "post the minutes and the budget somewhere we can read them"],
     [16, null, null, "solar panels on the school and library roofs"],
-    [16, null, null, "community owned energy like they have in Bristol"]
+    [16, null, null, "community owned energy like they have in Bristol"],
+    [17, 225, 410, "no toilets in the park so families with little ones have to go home"],
+    [17, 250, 395, "public loos by the playground please"]
+  ],
+
+  // Ideas held for an officer: about a group of people rather than a place or service.
+  held: [
+    { x: 432, y: 515, text: "get rid of the homeless people hanging around the parade",
+      suggestion: "More support for people sleeping rough near the Brookside parade, with outreach from local services." }
   ],
 
   // How each simulated group leans on each statement (-1 strongly against .. 1 strongly for).
   // The clustering never sees these labels: it has to rediscover the groups from votes alone.
   groupSpec: [
-    { n: 52, lean: [0.8, -0.7, 0.8, -0.3, 0.7, 0.6, 0.1, -0.4, 0.9, 0.8, 0.0, -0.6, 0.8, 0.3, 0.8, -0.2] },
-    { n: 46, lean: [0.9, 0.8, -0.6, 0.9, 0.8, 0.9, 0.6, 0.6, 0.4, 0.7, 0.7, 0.3, -0.5, 0.8, 0.9, 0.9] },
-    { n: 30, lean: [0.7, 0.3, 0.9, 0.4, 0.6, 0.5, 0.9, 0.6, -0.4, 0.6, 0.4, 0.9, -0.1, 0.6, 0.8, 0.6] }
+    { n: 52, lean: [0.8, -0.7, 0.8, -0.3, 0.7, 0.6, 0.1, -0.4, 0.9, 0.8, 0.0, -0.6, 0.8, 0.3, 0.8, -0.2, 0.7] },
+    { n: 46, lean: [0.9, 0.8, -0.6, 0.9, 0.8, 0.9, 0.6, 0.6, 0.4, 0.7, 0.7, 0.3, -0.5, 0.8, 0.9, 0.9, 0.6] },
+    { n: 30, lean: [0.7, -0.3, 0.9, 0.1, 0.6, 0.5, 0.9, 0.8, -0.7, 0.6, 0.4, 0.9, 0.3, 0.6, 0.8, 0.7, 0.8] }
   ]
 };
 
@@ -486,14 +503,14 @@ var PV_ENGINE = (function () {
     shop: "shops", shopping: "shops", store: "shops", stores: "shops", units: "shops", unit: "shops",
     kids: "young", teenagers: "young", teens: "young", youth: "young", children: "young",
     homes: "housing", houses: "housing", flats: "housing", home: "housing",
+    loo: "toilet", loos: "toilet", wc: "toilet", toilets: "toilet", lavatory: "toilet",
     doctor: "gp", doctors: "gp", surgery: "gp", appointment: "gp", appointments: "gp",
-    garden: "green", gardens: "green", allotment: "green", allotments: "green",
     speed: "speeding", speeds: "speeding", fast: "speeding", "20mph": "speeding",
     unsafe: "safety", safe: "safety", scary: "safety", crime: "safety", cctv: "safety", cameras: "safety",
     canal: "towpath", path: "towpath"
   };
   function tokens(text) {
-    return (text || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(function (w) {
+    return words(text).filter(function (w) {
       return w.length > 1 && STOP.indexOf(w) < 0;
     }).map(function (w) {
       w = SYN[w] || w;
@@ -573,23 +590,154 @@ var PV_ENGINE = (function () {
     var s = samples(g); return s[Math.floor(s.length / 2)].map(Math.round);
   }
 
-  // ---------- consolidation of new contributions (offline version) ----------
+  // ---------- topics and for/against (offline stand-ins for an AI model) ----------
+  // Two-word phrases are joined first, so "car park" is never read as a park.
+  var PHRASES = [
+    [/\bcar ?parks?\b/g, "carpark"], [/\bretail parks?\b/g, "retailpark"], [/\blow[- ]traffic( neighbourhoods?)?\b/g, "ltn"],
+    [/\brat[- ]?runs?\b/g, "ratrun"], [/\bthrough[- ]traffic\b/g, "throughtraffic"], [/\bfly[- ]?tipping\b/g, "flytipping"],
+    [/\bget(ting)? rid( of)?\b/g, "getrid"], [/\bbring(ing)? back\b/g, "bringback"], [/\bno more\b/g, "nomore"],
+    [/\b(rough sleep(ers|ing)?|sleeping rough)\b/g, "roughsleeping"], [/\bhigh street\b/g, "highstreet"], [/\bbus stops?\b/g, "busstop"],
+    [/\bdo ?n[o']?t\b/g, "dont"], [/\bshould ?n[o']?t\b/g, "shouldnt"], [/\bcan[no']*t\b/g, "cant"], [/\bpublic loos?\b/g, "toilet"], [/\bbus depot\b/g, "depot"], [/\bpump ?tracks?\b/g, "pumptrack"], [/\bskate ?parks?\b/g, "skatepark"]
+  ];
+  var TOPICS = {
+    toilets: ["Public toilets", "toilet toilets loo loos wc wcs lavatory lavatories"],
+    lighting: ["Lighting", "light lights lighting lit dark darkness streetlight streetlights lamp lamps"],
+    cycling: ["Cycling", "cycle cycling cyclist cyclists bike bikes biking cycleway"],
+    ltn: ["Low-traffic neighbourhoods", "ltn filter filters filtered"],
+    traffic: ["Through-traffic", "traffic throughtraffic ratrun lorries vehicles congestion"],
+    speed: ["Speeding and speed limits", "speeding speed 20mph speeds"],
+    parking: ["Parking", "parking parked carpark bays"],
+    parks: ["Parks and open space", "park parks green meadow grass"],
+    trees: ["Trees", "tree trees planting"],
+    growing: ["Food growing", "allotment allotments garden gardens growing"],
+    play: ["Play", "swing swings playground playgrounds slide slides pumptrack skatepark"],
+    young: ["Young people", "youth young kids children teenagers teens teenager"],
+    housing: ["Housing and development", "homes houses housing flats affordable development developers"],
+    shops: ["High street and market", "shop shops shopping units highstreet market traders businesses makers"],
+    health: ["Health services", "gp doctor doctors surgery appointment appointments pharmacy health"],
+    safety: ["Crime and safety", "cctv cameras crime antisocial police unsafe"],
+    board: ["How the Board works", "publish decisions minutes budget spending spends accountable transparency"],
+    energy: ["Energy", "solar energy panels renewable"],
+    litter: ["Litter and bins", "bins bin litter rubbish flytipping"],
+    buses: ["Buses", "bus buses busstop shelter"],
+    rail: ["Station", "station train trains"],
+    canal: ["Canal and towpath", "canal towpath"],
+    roughsleeping: ["People sleeping rough", "roughsleeping homeless homelessness"]
+  };
+  // Topics where "for" and "against" don't have a clear meaning ("introduce a 20mph limit" vs "stop speeding").
+  var NO_DIRECTION = { speed: 1, safety: 1 };
+  var WORD_TOPIC = {};
+  Object.keys(TOPICS).forEach(function (k) { TOPICS[k][1].split(" ").forEach(function (w) { WORD_TOPIC[w] = k; }); });
+  var UP = "add more build install open extend reopen create introduce plant provide allow keep protect improve fund expand increase bringback new support make put turn widen".split(" ");
+  var DOWN = "close closed closing remove ban banned stop scrap reduce fewer less getrid block blocked restrict cut demolish shut end oppose prevent lock locked nomore".split(" ");
+  var NEG = "no not dont never shouldnt cant without".split(" ");
+
+  function words(text) {
+    var t = " " + (text || "").toLowerCase().replace(/[’']/g, "'") + " ";
+    PHRASES.forEach(function (p) { t = t.replace(p[0], p[1]); });
+    return t.replace(/[^a-z0-9' ]+/g, " ").replace(/'/g, "").split(/\s+/).filter(Boolean);
+  }
+  function actionAt(w, i) {
+    var dir = UP.indexOf(w[i]) >= 0 ? 1 : DOWN.indexOf(w[i]) >= 0 ? -1 : 0;
+    if (!dir) return 0;
+    for (var k = Math.max(0, i - 2); k < i; k++) if (NEG.indexOf(w[k]) >= 0) dir = -dir; // "don't close", "not build"
+    return dir;
+  }
+  function topicOfWord(word) {
+    return WORD_TOPIC[word] || (word.length > 4 && /s$/.test(word) ? WORD_TOPIC[word.slice(0, -1)] : null) || null;
+  }
+  // Which topics a text mentions, and which way it pushes each one:
+  //   1 = for (add, open, keep...), -1 = against (close, remove, ban...), 0 = no direction,
+  //   "?" = unclear: "no toilets in the park" could be a complaint (wants toilets) or opposition.
+  // e.g. "Close Hollins Park at night" -> {green: -1}; "through-traffic blocked" -> {traffic: -1}
+  // Words straight after these describe WHERE an idea is ("toilets in the park"), not WHAT it is.
+  var PLACE_WORDS = "in at on near by behind outside along around opposite beside to next".split(" ");
+  function isPlaceMention(w, i) {
+    for (var k = Math.max(0, i - 3); k < i; k++) if (PLACE_WORDS.indexOf(w[k]) >= 0) {
+      // only if nothing between the place word and here is itself a topic or an action
+      var clean = true;
+      for (var m = k + 1; m < i; m++) if (topicOfWord(w[m]) || actionAt(w, m)) clean = false;
+      if (clean) return true;
+    }
+    return false;
+  }
+  function topics(text) {
+    var w = words(text), out = {}, places = {};
+    w.forEach(function (word, i) {
+      var t = topicOfWord(word); if (!t) return;
+      if (isPlaceMention(w, i)) { places[t] = 1; return; }
+      var dir = 0, best = 99, j, d;
+      for (j = Math.max(0, i - 6); j < i; j++) { d = actionAt(w, j); if (d && i - j <= best) { best = i - j; dir = d; } }
+      for (j = i + 1; j <= Math.min(w.length - 1, i + 2); j++) { d = actionAt(w, j); if (d && j - i < best) { best = j - i; dir = d; } }
+      // "protect the park FROM development": what follows "from" is pushed the other way
+      var fromAt = w.lastIndexOf("from", i);
+      if (fromAt > -1 && i - fromAt <= 4 && w.slice(Math.max(0, fromAt - 6), fromAt).some(function (x) { return x === "protect" || x === "keep"; })) dir = -1;
+      if (!dir && w.slice(Math.max(0, i - 2), i).indexOf("no") >= 0) dir = "?";
+      if (NO_DIRECTION[t]) dir = 0;
+      if (!(t in out) || (out[t] === 0 && dir)) out[t] = dir;
+    });
+    // If the only topic words were places ("something for the park"), keep them as the topic.
+    if (!Object.keys(out).length) Object.keys(places).forEach(function (k) { out[k] = 0; });
+    return out;
+  }
+  // The main topic of a statement: the one mentioned most across its wording and source ideas.
+  function mainTopic(texts) {
+    var count = {};
+    texts.forEach(function (t, i) {
+      Object.keys(topics(t)).forEach(function (k) { count[k] = (count[k] || 0) + (i === 0 ? 2 : 1); });
+      // "turn the car park INTO a pump track": the idea is what comes after "into"
+      var after = / into (.*)$/i.exec(t || "");
+      if (after) Object.keys(topics(after[1])).forEach(function (k) { count[k] = (count[k] || 0) + 1; });
+    });
+    var best = null; Object.keys(count).forEach(function (k) { if (!best || count[k] > count[best]) best = k; });
+    return best;
+  }
+  function topicName(k) { return k && TOPICS[k] ? TOPICS[k][0] : "Other"; }
+
+  // ---------- consolidation of new contributions ----------
+  // Map units are roughly 2 metres each. Separate sites further apart than this never merge.
+  var SAME_PLACE = 110;
+  var M_PER_UNIT = 2;
+
+  // Compare one idea with one statement. Returns similarity and the reason it would or wouldn't merge.
+  function compare(contrib, s) {
+    var ct = topics(contrib.text), st = topics(s.text);
+    // Topic overlap is judged against the statement's own wording, not every side-topic in its source ideas.
+    var cAll = Object.keys(ct), sKeys = Object.keys(st);
+    var shared = cAll.filter(function (k) { return k in st; });
+    var union = cAll.length + sKeys.length - shared.length;
+    var topicSim = union ? shared.length / union : 0;
+    var wordSim = cosine(bag(tokens(contrib.text)), bag(tokens([s.text].concat(s.sources || []).join(" "))));
+    var sim = 0.6 * topicSim + 0.4 * wordSim;
+    var opposed = shared.filter(function (k) { return (ct[k] === 1 || ct[k] === -1) && (st[k] === 1 || st[k] === -1) && ct[k] !== st[k]; });
+    var unclear = shared.filter(function (k) { return ct[k] === "?" && st[k] && st[k] !== "?"; });
+    var cg = shapeOf(contrib), sg = shapeOf(s), d = shapeDistance(cg, sg);
+    var bothWide = cg.type === "wide" && sg.type === "wide", mixed = (cg.type === "wide") !== (sg.type === "wide");
+    // Both must share a topic and some wording. Wording alone only counts when the dictionary found no topic at all.
+    var sameTopic = topicSim >= 0.3 && wordSim >= 0.2 || (wordSim >= 0.45 && (!cAll.length || !sKeys.length));
+    var reason, ok = false;
+    if (!sameTopic) reason = "Different topic";
+    else if (unclear.length && (mixed || bothWide || d <= SAME_PLACE)) reason = "Same topic and place, but unclear whether it's for or against: an officer will check";
+    else if (opposed.length) reason = "Same topic, but the opposite view: kept apart so the vote shows the split";
+    else if (mixed && wordSim < 0.6) reason = "One is for the whole area, the other for one place";
+    else if (!mixed && !bothWide && d > SAME_PLACE) reason = "Same topic, but about " + Math.round(d * M_PER_UNIT / 50) * 50 + " m away: kept as a separate site";
+    else { ok = true; reason = bothWide ? "Same topic, both for the whole area" : "Same topic, same place"; }
+    return { id: s.id, sim: sim, topicSim: topicSim, wordSim: wordSim, distance: d, opposed: opposed, unclear: unclear.length > 0 && /unclear/.test(reason), sameTopic: sameTopic, ok: ok, reason: reason };
+  }
+
   // contrib: {geom or x/y, text}. statements: [{id, x, y, geom, text, sources:[text...]}]
-  // Score = 65% shared wording + 35% closeness on the map.
-  // Whole-area ideas count as "close" only to other whole-area ideas, so a whole-area idea
-  // only joins a place-based statement (or vice versa) if the wording is very similar.
+  // Merges only when: same topic, not opposite views, and the same place (or both whole-area).
   function consolidate(contrib, statements) {
-    var cb = bag(tokens(contrib.text)), cg = shapeOf(contrib);
-    var ranked = statements.map(function (s) {
-      var sb = bag(tokens([s.text].concat(s.sources || []).join(" ")));
-      var text = cosine(cb, sb), sg = shapeOf(s), d = shapeDistance(cg, sg), near;
-      if (d === null) near = (cg.type === "wide" && sg.type === "wide") ? 0.6 : 0;
-      else near = Math.exp(-d / 140);
-      return { id: s.id, text: text, near: near, score: 0.65 * text + 0.35 * near };
-    }).sort(function (a, b) { return b.score - a.score; });
+    var ranked = statements.map(function (s) { return compare(contrib, s); })
+      .sort(function (a, b) { return (b.ok - a.ok) || (b.sim - a.sim); });
     var top = ranked[0];
-    var merge = top && top.text >= 0.2 && top.score >= 0.32;
-    return { action: merge ? "merge" : "new", match: top, ranked: ranked.slice(0, 3) };
+    var merge = !!(top && top.ok);
+    var unclearHit = !merge && ranked.some(function (r) { return r.unclear; });
+    var related = ranked.filter(function (r) { return r.sameTopic && !r.ok; });
+    return {
+      action: merge ? "merge" : unclearHit ? "review" : "new", match: top, ranked: ranked.filter(function (r) { return r.sameTopic || r.sim > 0.1; }).slice(0, 3),
+      related: related, topic: mainTopic([contrib.text])
+    };
   }
 
   // Offline stand-in for the AI rewrite: strip chatty openings, tidy capitals and full stop.
@@ -602,25 +750,31 @@ var PV_ENGINE = (function () {
     return t.replace(/!+$/, ".");
   }
 
-  // Light moderation for the demo: length, shouting, obvious abuse, personal details.
-  var BLOCK = ["idiot", "scum", "stupid", "hate", "f***", "shit", "fuck", "bastard"];
+  // Moderation for the demo.
+  //   block: never shown (insults, personal details).
+  //   review: held for an officer, because it targets a group of people rather than a place or service.
+  var BLOCK = ["idiot", "scum", "stupid", "f***", "shit", "fuck", "bastard", "vermin"];
+  var GROUPS = /\b(homeless|roughsleeping|beggars?|junkies|druggies|addicts|immigrants?|migrants?|asylum|refugees?|travellers?|gypsies|foreigners|yobs|chavs|hoodies|students|youths)\b/;
+  var REMOVE = /\b(getrid|remove|move on|moved on|kick out|keep out|ban|banned|clear out|drive out|go back|out of)\b/;
   function moderate(text) {
     var t = (text || "").trim();
-    if (t.length < 12) return "Add a little more detail (at least a short sentence).";
-    if (t.length > 220) return "Keep it under 220 characters so others can read and vote on it quickly.";
+    if (t.length < 12) return { block: "Add a little more detail (at least a short sentence)." };
+    if (t.length > 220) return { block: "Keep it under 220 characters so others can read and vote on it quickly." };
     var lower = t.toLowerCase();
-    for (var i = 0; i < BLOCK.length; i++) if (lower.indexOf(BLOCK[i]) >= 0) return "Please rephrase without insults or swearing.";
-    if (/\b\d{1,3}\s+[a-z]+\s+(street|road|lane|avenue|close|drive)\b/i.test(t)) return "Please don't include house numbers or anyone's address.";
-    if (/@|\b07\d{3}\s?\d{6}\b/.test(t)) return "Please don't include contact details.";
+    for (var i = 0; i < BLOCK.length; i++) if (lower.indexOf(BLOCK[i]) >= 0) return { block: "Please rephrase without insults or swearing." };
+    if (/\b\d{1,3}\s+[a-z]+\s+(street|road|lane|avenue|close|drive)\b/i.test(t)) return { block: "Please don't include house numbers or anyone's address." };
+    if (/@|\b07\d{3}\s?\d{6}\b/.test(t)) return { block: "Please don't include contact details." };
     var letters = t.replace(/[^A-Za-z]/g, "");
-    if (letters.length > 15 && letters === letters.toUpperCase()) return "Please don't write in all capitals.";
+    if (letters.length > 15 && letters === letters.toUpperCase()) return { block: "Please don't write in all capitals." };
+    var w = words(t).join(" ");
+    if (GROUPS.test(w) && REMOVE.test(w)) return { review: "Ideas need to be about places and services, not groups of people. An officer will review this one and may reword it into something everyone can vote on, such as support services or action on specific behaviour." };
     return null;
   }
 
   return {
     rng: rng, simulate: simulate, pca: pca, project: project, kmeans: kmeans, silhouette: silhouette,
     cluster: cluster, stats: stats, analyse: analyse, nearestGroup: nearestGroup,
-    tokens: tokens, consolidate: consolidate, shapeOf: shapeOf, shapeDistance: shapeDistance, anchor: anchor, tidy: tidy, moderate: moderate
+    tokens: tokens, consolidate: consolidate, compare: compare, topics: topics, mainTopic: mainTopic, topicName: topicName, SAME_PLACE: SAME_PLACE, M_PER_UNIT: M_PER_UNIT, shapeOf: shapeOf, shapeDistance: shapeDistance, anchor: anchor, tidy: tidy, moderate: moderate
   };
 })();
 
@@ -636,7 +790,7 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
   const GCOL = ["var(--gA)", "var(--gB)", "var(--gC)", "var(--gD)"];
   const GNAME = i => "Group " + "ABCD"[i];
   const pct = p => Math.round(p * 100) + "%";
-  const KEY = "placevote-hollins-v2";
+  const KEY = "placevote-hollins-v3";
 
   // ---------- the simulated neighbourhood (fixed seed, so the same for every visitor) ----------
   const sim = E.simulate(D.groupSpec, 7);
@@ -645,9 +799,9 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
   const SEEDN = D.statements.length;
 
   // ---------- visitor state ----------
-  let S = { tab: "ideas", votes: {}, mine: [], extra: [], sel: null, adding: false, draft: null, voteId: null, view: -1, outcome: null };
-  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) Object.assign(S, { votes: saved.votes || {}, mine: saved.mine || [], extra: saved.extra || [] }); } catch (e) {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ votes: S.votes, mine: S.mine, extra: S.extra })); } catch (e) {} };
+  let S = { tab: "ideas", votes: {}, mine: [], extra: [], held: [], sel: null, adding: false, draft: null, voteId: null, view: -1, outcome: null };
+  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) Object.assign(S, { votes: saved.votes || {}, mine: saved.mine || [], extra: saved.extra || [], held: saved.held || [] }); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ votes: S.votes, mine: S.mine, extra: S.extra, held: S.held })); } catch (e) {} };
 
   function statements() {
     const base = D.statements.map(s => ({
@@ -823,7 +977,7 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
   });
   function selectPin(id) {
     if (S.tab === "vote") { S.voteId = id; }
-    else if (S.tab === "results") { S.sel = S.sel === id ? null : id; }
+    else if (S.tab === "results" || S.tab === "officer") { S.sel = S.sel === id ? null : id; }
     else { S.tab = "ideas"; S.sel = S.sel === id ? null : id; S.outcome = null; }
     render();
   }
@@ -875,37 +1029,70 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
     return h;
   }
 
+  const metres = d => d === null || d === undefined ? "" : `${Math.round(d * E.M_PER_UNIT / 50) * 50} m`;
   function outcomeCard(o) {
+    if (o.action === "held") {
+      return `<section class="card" style="border-color:var(--accent)"><h3>Held for an officer to review</h3>
+        <p>${esc(o.why)}</p><p class="small mute">It won't go to the vote as written. You'll see it in the Officer view tab, which is what a Board officer would work from.</p>
+        <button class="btn" data-act="tab" data-tab="officer">See the Officer view</button></section>`;
+    }
     const s = byId(o.into);
-    const rows = o.ranked.map(r => { const t = byId(r.id); return `<div class="match"><span><b>${r.id}</b> ${esc(t ? t.text : "")}</span><div class="bar" style="grid-template-columns:minmax(0,1fr) 2.6em"><div class="tr"><i style="width:${Math.round(r.score * 100)}%;background:var(--accent)"></i></div><b>${r.score.toFixed(2)}</b></div></div>`; }).join("");
+    const rows = o.ranked.map(r => { const t = byId(r.id); return `<div class="why"><span class="num">${r.id}</span><span><b>${esc(t ? t.text : "")}</b><br><span class="small" style="color:${r.ok ? "var(--agree)" : "var(--mute)"}">${esc(r.reason)}</span></span></div>`; }).join("");
+    const sep = (o.related || []).filter(r => /separate site/.test(r.reason));
+    const opp = (o.related || []).filter(r => /opposite/.test(r.reason));
+    let body;
+    if (o.disputed) body = `Done. Your idea is now its own statement, “${esc(s.text)}”, and the officer has been told the automatic merge got it wrong.`;
+    else if (o.action === "merge") body = `It's the same topic and the same place as “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`;
+    else body = `Nothing existing was the same idea in the same place, so it became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`;
+    let extra = "";
+    if (sep.length) extra += `<p class="small">There's a similar idea elsewhere: ${sep.map(r => `<b>${r.id}</b> (${metres(r.distance)} away)`).join(", ")}. They stay as separate statements so people can back one site and not the other. The officer sees them grouped under the same topic.</p>`;
+    if (opp.length) extra += `<p class="small">An opposite view already exists here: ${opp.map(r => `<b>${r.id}</b>`).join(", ")}. Both stay on the list so the vote shows the split.</p>`;
     return `<section class="card" style="border-color:var(--accent)">
       <h3>${o.action === "merge" ? `Merged into statement ${o.into}` : `New statement ${o.into} added to the vote`}</h3>
-      <p>${o.action === "merge"
-        ? `Your idea was close in wording and place to “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`
-        : `Nothing existing was close enough, so your idea became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`}</p>
+      <p>${body}</p>${extra}
       <details><summary>Show how it was matched</summary>
-        <p class="small mute">Closest existing statements, scored 0 to 1 on shared wording (65%) and closeness on the map (35%). Distance is measured between shapes, so an idea inside an area or along a route counts as close. Whole-area ideas are only close to other whole-area ideas. Merging needs a score of 0.32 or more with some shared wording.</p>${rows}</details>
-      <div style="margin-top:10px"><button class="btn" data-act="voteon" data-id="${o.into}">Vote on it</button></div></section>`;
+        <p class="small mute">Each idea is read for its topic (what it's about), its place (point, route, area or whole area) and its direction (for or against). It merges only if all three line up. Places more than about ${Math.round(E.SAME_PLACE * E.M_PER_UNIT / 10) * 10} m apart stay separate, and opposite views never merge.</p>${rows || '<p class="small">No similar statements.</p>'}</details>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" data-act="voteon" data-id="${o.into}">Vote on it</button>
+      ${o.action === "merge" ? `<button class="btn" data-act="dispute">That's not what I meant</button>` : ""}</div></section>`;
   }
 
   function submitIdea() {
     const text = $("#idea").value, cat = $("#cat").value;
-    const problem = E.moderate(text);
-    if (problem) { $("#err").textContent = problem; return; }
+    const mod = E.moderate(text);
+    if (mod && mod.block) { $("#err").textContent = mod.block; return; }
     if (!draftOK()) { $("#err").textContent = { point: "Tap the map to place your idea first.", line: "Tap at least two points to draw the route.", area: "Tap at least three corners to draw the area." }[S.draft.type]; return; }
     const geom = { type: S.draft.type, pts: S.draft.pts.slice() };
+    const done = () => { S.adding = false; S.draft = null; S.text = ""; S.sel = null; save(); render(); };
+    if (mod && mod.review) {
+      S.held.push({ geom, text: text.trim(), cat, why: "About a group of people, not a place or service" });
+      S.outcome = { action: "held", why: mod.review }; return done();
+    }
     const all = statements();
     const res = E.consolidate({ geom, text }, all.map(s => ({ ...s, sources: s.sources.map(r => r.text) })));
+    if (res.action === "review") {
+      S.held.push({ geom, text: text.trim(), cat, why: "Unclear whether it's for or against statement " + res.ranked.find(r => r.unclear).id });
+      S.outcome = { action: "held", why: "This is close to an existing statement, but it isn't clear whether you're for or against it. An officer will check, so your idea isn't counted the wrong way." };
+      return done();
+    }
     let into;
     if (res.action === "merge") into = res.match.id;
-    else {
-      into = Math.max(...all.map(s => s.id)) + 1;
-      const at = E.anchor(geom);
-      S.extra.push({ id: into, x: at ? at[0] : null, y: at ? at[1] : null, geom, cat, place: geom.type === "wide" ? "Whole area" : "", text: E.tidy(text) });
-    }
+    else into = newStatement(geom, cat, text);
     S.mine.push({ geom, text: text.trim(), cat, into });
-    S.outcome = { action: res.action, into, ranked: res.ranked };
-    S.adding = false; S.draft = null; S.text = ""; S.sel = null;
+    S.outcome = { action: res.action, into, ranked: res.ranked, related: res.related, mine: S.mine.length - 1 };
+    done();
+  }
+  function newStatement(geom, cat, text) {
+    const into = Math.max(...statements().map(s => s.id)) + 1;
+    const at = E.anchor(geom);
+    S.extra.push({ id: into, x: at ? at[0] : null, y: at ? at[1] : null, geom, cat, place: geom.type === "wide" ? "Whole area" : "", text: E.tidy(text) });
+    return into;
+  }
+  // "That's not what I meant": undo the merge, make the idea its own statement, flag it for the officer.
+  function dispute() {
+    const o = S.outcome, m = S.mine[o.mine]; if (!m) return;
+    m.disputedFrom = m.into;
+    m.into = newStatement(m.geom, m.cat, m.text);
+    S.outcome = { action: "new", into: m.into, ranked: [], related: [], disputed: true };
     save(); render();
   }
 
@@ -1032,13 +1219,51 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
     return h;
   }
 
+  // ---------- officer view ----------
+  function topicBoard() {
+    const list = statements(), by = {};
+    list.forEach(st => {
+      const k = E.mainTopic([st.text].concat(st.sources.map(r => r.text))) || "other";
+      (by[k] = by[k] || []).push(st);
+    });
+    return Object.keys(by).map(k => {
+      const sts = by[k], flags = [];
+      for (let i = 0; i < sts.length; i++) for (let j = i + 1; j < sts.length; j++) {
+        const a = sts[i], b = sts[j], c = E.compare({ x: a.x, y: a.y, geom: a.geom, text: a.text }, { ...b, sources: [] });
+        if (c.opposed.length) flags.push({ kind: "opp", text: `<b>${a.id}</b> and <b>${b.id}</b> are opposite views. Both stay on the list so the vote shows the split.` });
+        else if (c.sameTopic && /separate site/.test(c.reason)) flags.push({ kind: "site", text: `<b>${a.id}</b> and <b>${b.id}</b> are the same idea in different places (${metres(c.distance)} apart). Keep them separate if the choice of site is contested; otherwise combine them into one whole-area statement.` });
+      }
+      return { key: k, name: k === "other" ? "Other" : E.topicName(k), sts, ideas: sts.reduce((n, x) => n + x.sources.length, 0), flags };
+    }).sort((a, b) => (b.flags.length - a.flags.length) || (b.ideas - a.ideas));
+  }
+
+  function officerPanel() {
+    const board = topicBoard();
+    const held = D.held.map(h => ({ ...h, seed: true, why: "About a group of people, not a place or service" })).concat(S.held);
+    const disputed = S.mine.filter(m => m.disputedFrom);
+    const flagged = board.reduce((n, t) => n + t.flags.length, 0);
+    let h = `<section><h2>Officer view</h2>
+      <p>What a Neighbourhood Board officer works from: every idea sorted into topics, with anything that needs a human decision flagged. In the full version, an AI model drafts the merged statements and the officer approves, edits, splits or combines them here.</p>
+      <div class="stats"><div class="stat"><b>${board.length}</b><span>topics</span></div><div class="stat"><b>${statements().length}</b><span>statements</span></div><div class="stat"><b>${held.length + disputed.length + flagged}</b><span>need a decision</span></div></div></section>`;
+
+    h += `<section><h3>Held for review</h3>${held.length ? `<ul class="list">${held.map(x => `<li class="row" style="cursor:default"><span class="t">“${esc(x.text)}”<br><span class="small" style="color:var(--accent)">${esc(x.why)}</span>${x.suggestion ? `<br><span class="small">Suggested rewording: <b>${esc(x.suggestion)}</b></span>` : ""}</span>${x.seed ? "" : '<span class="tag you">yours</span>'}</li>`).join("")}</ul>` : '<p class="small mute">Nothing waiting.</p>'}</section>`;
+
+    if (disputed.length) h += `<section><h3>Residents who disputed a merge</h3><ul class="list">${disputed.map(m => `<li class="row" style="cursor:default"><span class="t">“${esc(m.text)}”<br><span class="small">Was merged into <b>${m.disputedFrom}</b>, now its own statement <b>${m.into}</b>. Check whether the merge rule needs adjusting.</span></span><span class="tag you">yours</span></li>`).join("")}</ul></section>`;
+
+    h += `<section><h3>Topics</h3><p class="small mute">Grouped by what each statement is about, regardless of place. Topics with flags come first.</p>${board.map(t => `
+      <div class="topic"><div class="topic-h"><b>${esc(t.name)}</b><span class="small mute">${t.ideas} idea${t.ideas === 1 ? "" : "s"} · ${t.sts.length} statement${t.sts.length === 1 ? "" : "s"}</span></div>
+        ${t.flags.map(f => `<p class="flag ${f.kind}">${f.text}</p>`).join("")}
+        <ul class="list">${t.sts.map(st => `<li class="row${S.sel === st.id ? " on-row" : ""}" tabindex="0" data-opick="${st.id}"><span class="num">${st.id}</span><span class="t">${esc(st.text)}<br><span class="small mute">${esc(st.place || "New this round")} · ${st.sources.length} idea${st.sources.length === 1 ? "" : "s"}</span></span>${shapeTag(st)}${st.isNew ? '<span class="tag you">new</span>' : ""}</li>`).join("")}</ul></div>`).join("")}</section>`;
+    return h;
+  }
+
   // ---------- how it works ----------
   function howPanel() {
     return `<section><h2>How it works</h2>
       <p>PlaceVote joins two things that usually live apart: a map where residents say what should change and where (participatory GIS), and the pol.is method for finding consensus across a large group.</p>
       <ol class="steps">
         <li><b>Share ideas on the map.</b> Residents pin an idea to a spot, draw it along a route, mark out an area, or add a whole-area idea that covers the neighbourhood, such as a policy or how the Board works.</li>
-        <li><b>Merge overlapping ideas.</b> Hundreds of scattered pins can't be voted on fairly, so similar ideas in similar places are merged into one clear statement. This demo matches on shared wording and the distance between shapes; whole-area ideas are matched with each other. The full version uses an AI model to write the merged statement, with a person checking it.</li>
+        <li><b>Merge overlapping ideas, carefully.</b> Hundreds of scattered pins can't be voted on fairly, so ideas are merged, but only when three things line up: the same topic ("loos" and "toilets" count as the same), the same place (separate sites more than about 200 m apart stay separate), and the same direction (opposite views like "keep the park open at night" and "close it" never merge). Ideas aimed at a group of people, or where it's unclear whether they're for or against, are held for an officer. Residents can undo a merge they disagree with. This demo reads topics and direction with a built-in dictionary; the full version would use an AI model, with an officer approving its drafts.</li>
         <li><b>Everyone votes on the same list.</b> Agree, disagree or unsure. Because everyone sees the same statements, the votes can be compared.</li>
         <li><b>Find opinion groups.</b> The vote table is compressed to two dimensions (principal component analysis) and grouped with k-means. The number of groups is chosen by silhouette score, as pol.is does.</li>
         <li><b>Find common ground.</b> A statement counts as common ground only if <i>every</i> group tends to agree, so a large group can't outvote a small one.</li>
@@ -1058,7 +1283,7 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
     document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === S.tab));
     $("#voteCount").textContent = Object.keys(S.votes).length;
     const P = $("#panel");
-    P.innerHTML = S.tab === "ideas" ? ideasPanel() : S.tab === "vote" ? votePanel() : S.tab === "results" ? resultsPanel() : howPanel();
+    P.innerHTML = S.tab === "ideas" ? ideasPanel() : S.tab === "vote" ? votePanel() : S.tab === "results" ? resultsPanel() : S.tab === "officer" ? officerPanel() : howPanel();
     drawPins();
     if (S.tab === "results") scatter();
   }
@@ -1072,11 +1297,12 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
   $("#panel").addEventListener("change", e => { if (e.target.id === "cat") S.cat = e.target.value; });
 
   $("#panel").addEventListener("click", e => {
-    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-view],[data-mode]"); if (!t) return;
+    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-opick],[data-view],[data-mode]"); if (!t) return;
     const d = t.dataset;
     if (d.vote !== undefined) return castVote(+d.vote);
     if (d.pick) { S.sel = +d.pick; S.outcome = null; render(); return; }
     if (d.votepick) { S.voteId = +d.votepick; render(); return; }
+    if (d.opick) { S.sel = S.sel === +d.opick ? null : +d.opick; render(); return; }
     if (d.rpick) { S.sel = S.sel === +d.rpick ? null : +d.rpick; drawPins(); return; }
     if (d.view !== undefined) { S.view = +d.view; render(); return; }
     if (d.mode) {
@@ -1093,6 +1319,7 @@ if (typeof module !== "undefined") module.exports = PV_ENGINE;
         break;
       case "cancel": S.adding = false; S.draft = null; render(); break;
       case "submit": submitIdea(); break;
+      case "dispute": dispute(); break;
       case "close": S.sel = null; render(); break;
       case "voteon": S.tab = "vote"; S.voteId = +d.id; S.sel = null; S.outcome = null; render(); break;
       case "tab": S.tab = d.tab; render(); break;

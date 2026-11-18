@@ -239,14 +239,14 @@ var PV_ENGINE = (function () {
     shop: "shops", shopping: "shops", store: "shops", stores: "shops", units: "shops", unit: "shops",
     kids: "young", teenagers: "young", teens: "young", youth: "young", children: "young",
     homes: "housing", houses: "housing", flats: "housing", home: "housing",
+    loo: "toilet", loos: "toilet", wc: "toilet", toilets: "toilet", lavatory: "toilet",
     doctor: "gp", doctors: "gp", surgery: "gp", appointment: "gp", appointments: "gp",
-    garden: "green", gardens: "green", allotment: "green", allotments: "green",
     speed: "speeding", speeds: "speeding", fast: "speeding", "20mph": "speeding",
     unsafe: "safety", safe: "safety", scary: "safety", crime: "safety", cctv: "safety", cameras: "safety",
     canal: "towpath", path: "towpath"
   };
   function tokens(text) {
-    return (text || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(function (w) {
+    return words(text).filter(function (w) {
       return w.length > 1 && STOP.indexOf(w) < 0;
     }).map(function (w) {
       w = SYN[w] || w;
@@ -326,23 +326,154 @@ var PV_ENGINE = (function () {
     var s = samples(g); return s[Math.floor(s.length / 2)].map(Math.round);
   }
 
-  // ---------- consolidation of new contributions (offline version) ----------
+  // ---------- topics and for/against (offline stand-ins for an AI model) ----------
+  // Two-word phrases are joined first, so "car park" is never read as a park.
+  var PHRASES = [
+    [/\bcar ?parks?\b/g, "carpark"], [/\bretail parks?\b/g, "retailpark"], [/\blow[- ]traffic( neighbourhoods?)?\b/g, "ltn"],
+    [/\brat[- ]?runs?\b/g, "ratrun"], [/\bthrough[- ]traffic\b/g, "throughtraffic"], [/\bfly[- ]?tipping\b/g, "flytipping"],
+    [/\bget(ting)? rid( of)?\b/g, "getrid"], [/\bbring(ing)? back\b/g, "bringback"], [/\bno more\b/g, "nomore"],
+    [/\b(rough sleep(ers|ing)?|sleeping rough)\b/g, "roughsleeping"], [/\bhigh street\b/g, "highstreet"], [/\bbus stops?\b/g, "busstop"],
+    [/\bdo ?n[o']?t\b/g, "dont"], [/\bshould ?n[o']?t\b/g, "shouldnt"], [/\bcan[no']*t\b/g, "cant"], [/\bpublic loos?\b/g, "toilet"], [/\bbus depot\b/g, "depot"], [/\bpump ?tracks?\b/g, "pumptrack"], [/\bskate ?parks?\b/g, "skatepark"]
+  ];
+  var TOPICS = {
+    toilets: ["Public toilets", "toilet toilets loo loos wc wcs lavatory lavatories"],
+    lighting: ["Lighting", "light lights lighting lit dark darkness streetlight streetlights lamp lamps"],
+    cycling: ["Cycling", "cycle cycling cyclist cyclists bike bikes biking cycleway"],
+    ltn: ["Low-traffic neighbourhoods", "ltn filter filters filtered"],
+    traffic: ["Through-traffic", "traffic throughtraffic ratrun lorries vehicles congestion"],
+    speed: ["Speeding and speed limits", "speeding speed 20mph speeds"],
+    parking: ["Parking", "parking parked carpark bays"],
+    parks: ["Parks and open space", "park parks green meadow grass"],
+    trees: ["Trees", "tree trees planting"],
+    growing: ["Food growing", "allotment allotments garden gardens growing"],
+    play: ["Play", "swing swings playground playgrounds slide slides pumptrack skatepark"],
+    young: ["Young people", "youth young kids children teenagers teens teenager"],
+    housing: ["Housing and development", "homes houses housing flats affordable development developers"],
+    shops: ["High street and market", "shop shops shopping units highstreet market traders businesses makers"],
+    health: ["Health services", "gp doctor doctors surgery appointment appointments pharmacy health"],
+    safety: ["Crime and safety", "cctv cameras crime antisocial police unsafe"],
+    board: ["How the Board works", "publish decisions minutes budget spending spends accountable transparency"],
+    energy: ["Energy", "solar energy panels renewable"],
+    litter: ["Litter and bins", "bins bin litter rubbish flytipping"],
+    buses: ["Buses", "bus buses busstop shelter"],
+    rail: ["Station", "station train trains"],
+    canal: ["Canal and towpath", "canal towpath"],
+    roughsleeping: ["People sleeping rough", "roughsleeping homeless homelessness"]
+  };
+  // Topics where "for" and "against" don't have a clear meaning ("introduce a 20mph limit" vs "stop speeding").
+  var NO_DIRECTION = { speed: 1, safety: 1 };
+  var WORD_TOPIC = {};
+  Object.keys(TOPICS).forEach(function (k) { TOPICS[k][1].split(" ").forEach(function (w) { WORD_TOPIC[w] = k; }); });
+  var UP = "add more build install open extend reopen create introduce plant provide allow keep protect improve fund expand increase bringback new support make put turn widen".split(" ");
+  var DOWN = "close closed closing remove ban banned stop scrap reduce fewer less getrid block blocked restrict cut demolish shut end oppose prevent lock locked nomore".split(" ");
+  var NEG = "no not dont never shouldnt cant without".split(" ");
+
+  function words(text) {
+    var t = " " + (text || "").toLowerCase().replace(/[’']/g, "'") + " ";
+    PHRASES.forEach(function (p) { t = t.replace(p[0], p[1]); });
+    return t.replace(/[^a-z0-9' ]+/g, " ").replace(/'/g, "").split(/\s+/).filter(Boolean);
+  }
+  function actionAt(w, i) {
+    var dir = UP.indexOf(w[i]) >= 0 ? 1 : DOWN.indexOf(w[i]) >= 0 ? -1 : 0;
+    if (!dir) return 0;
+    for (var k = Math.max(0, i - 2); k < i; k++) if (NEG.indexOf(w[k]) >= 0) dir = -dir; // "don't close", "not build"
+    return dir;
+  }
+  function topicOfWord(word) {
+    return WORD_TOPIC[word] || (word.length > 4 && /s$/.test(word) ? WORD_TOPIC[word.slice(0, -1)] : null) || null;
+  }
+  // Which topics a text mentions, and which way it pushes each one:
+  //   1 = for (add, open, keep...), -1 = against (close, remove, ban...), 0 = no direction,
+  //   "?" = unclear: "no toilets in the park" could be a complaint (wants toilets) or opposition.
+  // e.g. "Close Hollins Park at night" -> {green: -1}; "through-traffic blocked" -> {traffic: -1}
+  // Words straight after these describe WHERE an idea is ("toilets in the park"), not WHAT it is.
+  var PLACE_WORDS = "in at on near by behind outside along around opposite beside to next".split(" ");
+  function isPlaceMention(w, i) {
+    for (var k = Math.max(0, i - 3); k < i; k++) if (PLACE_WORDS.indexOf(w[k]) >= 0) {
+      // only if nothing between the place word and here is itself a topic or an action
+      var clean = true;
+      for (var m = k + 1; m < i; m++) if (topicOfWord(w[m]) || actionAt(w, m)) clean = false;
+      if (clean) return true;
+    }
+    return false;
+  }
+  function topics(text) {
+    var w = words(text), out = {}, places = {};
+    w.forEach(function (word, i) {
+      var t = topicOfWord(word); if (!t) return;
+      if (isPlaceMention(w, i)) { places[t] = 1; return; }
+      var dir = 0, best = 99, j, d;
+      for (j = Math.max(0, i - 6); j < i; j++) { d = actionAt(w, j); if (d && i - j <= best) { best = i - j; dir = d; } }
+      for (j = i + 1; j <= Math.min(w.length - 1, i + 2); j++) { d = actionAt(w, j); if (d && j - i < best) { best = j - i; dir = d; } }
+      // "protect the park FROM development": what follows "from" is pushed the other way
+      var fromAt = w.lastIndexOf("from", i);
+      if (fromAt > -1 && i - fromAt <= 4 && w.slice(Math.max(0, fromAt - 6), fromAt).some(function (x) { return x === "protect" || x === "keep"; })) dir = -1;
+      if (!dir && w.slice(Math.max(0, i - 2), i).indexOf("no") >= 0) dir = "?";
+      if (NO_DIRECTION[t]) dir = 0;
+      if (!(t in out) || (out[t] === 0 && dir)) out[t] = dir;
+    });
+    // If the only topic words were places ("something for the park"), keep them as the topic.
+    if (!Object.keys(out).length) Object.keys(places).forEach(function (k) { out[k] = 0; });
+    return out;
+  }
+  // The main topic of a statement: the one mentioned most across its wording and source ideas.
+  function mainTopic(texts) {
+    var count = {};
+    texts.forEach(function (t, i) {
+      Object.keys(topics(t)).forEach(function (k) { count[k] = (count[k] || 0) + (i === 0 ? 2 : 1); });
+      // "turn the car park INTO a pump track": the idea is what comes after "into"
+      var after = / into (.*)$/i.exec(t || "");
+      if (after) Object.keys(topics(after[1])).forEach(function (k) { count[k] = (count[k] || 0) + 1; });
+    });
+    var best = null; Object.keys(count).forEach(function (k) { if (!best || count[k] > count[best]) best = k; });
+    return best;
+  }
+  function topicName(k) { return k && TOPICS[k] ? TOPICS[k][0] : "Other"; }
+
+  // ---------- consolidation of new contributions ----------
+  // Map units are roughly 2 metres each. Separate sites further apart than this never merge.
+  var SAME_PLACE = 110;
+  var M_PER_UNIT = 2;
+
+  // Compare one idea with one statement. Returns similarity and the reason it would or wouldn't merge.
+  function compare(contrib, s) {
+    var ct = topics(contrib.text), st = topics(s.text);
+    // Topic overlap is judged against the statement's own wording, not every side-topic in its source ideas.
+    var cAll = Object.keys(ct), sKeys = Object.keys(st);
+    var shared = cAll.filter(function (k) { return k in st; });
+    var union = cAll.length + sKeys.length - shared.length;
+    var topicSim = union ? shared.length / union : 0;
+    var wordSim = cosine(bag(tokens(contrib.text)), bag(tokens([s.text].concat(s.sources || []).join(" "))));
+    var sim = 0.6 * topicSim + 0.4 * wordSim;
+    var opposed = shared.filter(function (k) { return (ct[k] === 1 || ct[k] === -1) && (st[k] === 1 || st[k] === -1) && ct[k] !== st[k]; });
+    var unclear = shared.filter(function (k) { return ct[k] === "?" && st[k] && st[k] !== "?"; });
+    var cg = shapeOf(contrib), sg = shapeOf(s), d = shapeDistance(cg, sg);
+    var bothWide = cg.type === "wide" && sg.type === "wide", mixed = (cg.type === "wide") !== (sg.type === "wide");
+    // Both must share a topic and some wording. Wording alone only counts when the dictionary found no topic at all.
+    var sameTopic = topicSim >= 0.3 && wordSim >= 0.2 || (wordSim >= 0.45 && (!cAll.length || !sKeys.length));
+    var reason, ok = false;
+    if (!sameTopic) reason = "Different topic";
+    else if (unclear.length && (mixed || bothWide || d <= SAME_PLACE)) reason = "Same topic and place, but unclear whether it's for or against: an officer will check";
+    else if (opposed.length) reason = "Same topic, but the opposite view: kept apart so the vote shows the split";
+    else if (mixed && wordSim < 0.6) reason = "One is for the whole area, the other for one place";
+    else if (!mixed && !bothWide && d > SAME_PLACE) reason = "Same topic, but about " + Math.round(d * M_PER_UNIT / 50) * 50 + " m away: kept as a separate site";
+    else { ok = true; reason = bothWide ? "Same topic, both for the whole area" : "Same topic, same place"; }
+    return { id: s.id, sim: sim, topicSim: topicSim, wordSim: wordSim, distance: d, opposed: opposed, unclear: unclear.length > 0 && /unclear/.test(reason), sameTopic: sameTopic, ok: ok, reason: reason };
+  }
+
   // contrib: {geom or x/y, text}. statements: [{id, x, y, geom, text, sources:[text...]}]
-  // Score = 65% shared wording + 35% closeness on the map.
-  // Whole-area ideas count as "close" only to other whole-area ideas, so a whole-area idea
-  // only joins a place-based statement (or vice versa) if the wording is very similar.
+  // Merges only when: same topic, not opposite views, and the same place (or both whole-area).
   function consolidate(contrib, statements) {
-    var cb = bag(tokens(contrib.text)), cg = shapeOf(contrib);
-    var ranked = statements.map(function (s) {
-      var sb = bag(tokens([s.text].concat(s.sources || []).join(" ")));
-      var text = cosine(cb, sb), sg = shapeOf(s), d = shapeDistance(cg, sg), near;
-      if (d === null) near = (cg.type === "wide" && sg.type === "wide") ? 0.6 : 0;
-      else near = Math.exp(-d / 140);
-      return { id: s.id, text: text, near: near, score: 0.65 * text + 0.35 * near };
-    }).sort(function (a, b) { return b.score - a.score; });
+    var ranked = statements.map(function (s) { return compare(contrib, s); })
+      .sort(function (a, b) { return (b.ok - a.ok) || (b.sim - a.sim); });
     var top = ranked[0];
-    var merge = top && top.text >= 0.2 && top.score >= 0.32;
-    return { action: merge ? "merge" : "new", match: top, ranked: ranked.slice(0, 3) };
+    var merge = !!(top && top.ok);
+    var unclearHit = !merge && ranked.some(function (r) { return r.unclear; });
+    var related = ranked.filter(function (r) { return r.sameTopic && !r.ok; });
+    return {
+      action: merge ? "merge" : unclearHit ? "review" : "new", match: top, ranked: ranked.filter(function (r) { return r.sameTopic || r.sim > 0.1; }).slice(0, 3),
+      related: related, topic: mainTopic([contrib.text])
+    };
   }
 
   // Offline stand-in for the AI rewrite: strip chatty openings, tidy capitals and full stop.
@@ -355,25 +486,31 @@ var PV_ENGINE = (function () {
     return t.replace(/!+$/, ".");
   }
 
-  // Light moderation for the demo: length, shouting, obvious abuse, personal details.
-  var BLOCK = ["idiot", "scum", "stupid", "hate", "f***", "shit", "fuck", "bastard"];
+  // Moderation for the demo.
+  //   block: never shown (insults, personal details).
+  //   review: held for an officer, because it targets a group of people rather than a place or service.
+  var BLOCK = ["idiot", "scum", "stupid", "f***", "shit", "fuck", "bastard", "vermin"];
+  var GROUPS = /\b(homeless|roughsleeping|beggars?|junkies|druggies|addicts|immigrants?|migrants?|asylum|refugees?|travellers?|gypsies|foreigners|yobs|chavs|hoodies|students|youths)\b/;
+  var REMOVE = /\b(getrid|remove|move on|moved on|kick out|keep out|ban|banned|clear out|drive out|go back|out of)\b/;
   function moderate(text) {
     var t = (text || "").trim();
-    if (t.length < 12) return "Add a little more detail (at least a short sentence).";
-    if (t.length > 220) return "Keep it under 220 characters so others can read and vote on it quickly.";
+    if (t.length < 12) return { block: "Add a little more detail (at least a short sentence)." };
+    if (t.length > 220) return { block: "Keep it under 220 characters so others can read and vote on it quickly." };
     var lower = t.toLowerCase();
-    for (var i = 0; i < BLOCK.length; i++) if (lower.indexOf(BLOCK[i]) >= 0) return "Please rephrase without insults or swearing.";
-    if (/\b\d{1,3}\s+[a-z]+\s+(street|road|lane|avenue|close|drive)\b/i.test(t)) return "Please don't include house numbers or anyone's address.";
-    if (/@|\b07\d{3}\s?\d{6}\b/.test(t)) return "Please don't include contact details.";
+    for (var i = 0; i < BLOCK.length; i++) if (lower.indexOf(BLOCK[i]) >= 0) return { block: "Please rephrase without insults or swearing." };
+    if (/\b\d{1,3}\s+[a-z]+\s+(street|road|lane|avenue|close|drive)\b/i.test(t)) return { block: "Please don't include house numbers or anyone's address." };
+    if (/@|\b07\d{3}\s?\d{6}\b/.test(t)) return { block: "Please don't include contact details." };
     var letters = t.replace(/[^A-Za-z]/g, "");
-    if (letters.length > 15 && letters === letters.toUpperCase()) return "Please don't write in all capitals.";
+    if (letters.length > 15 && letters === letters.toUpperCase()) return { block: "Please don't write in all capitals." };
+    var w = words(t).join(" ");
+    if (GROUPS.test(w) && REMOVE.test(w)) return { review: "Ideas need to be about places and services, not groups of people. An officer will review this one and may reword it into something everyone can vote on, such as support services or action on specific behaviour." };
     return null;
   }
 
   return {
     rng: rng, simulate: simulate, pca: pca, project: project, kmeans: kmeans, silhouette: silhouette,
     cluster: cluster, stats: stats, analyse: analyse, nearestGroup: nearestGroup,
-    tokens: tokens, consolidate: consolidate, shapeOf: shapeOf, shapeDistance: shapeDistance, anchor: anchor, tidy: tidy, moderate: moderate
+    tokens: tokens, consolidate: consolidate, compare: compare, topics: topics, mainTopic: mainTopic, topicName: topicName, SAME_PLACE: SAME_PLACE, M_PER_UNIT: M_PER_UNIT, shapeOf: shapeOf, shapeDistance: shapeDistance, anchor: anchor, tidy: tidy, moderate: moderate
   };
 })();
 

@@ -6,7 +6,7 @@
   const GCOL = ["var(--gA)", "var(--gB)", "var(--gC)", "var(--gD)"];
   const GNAME = i => "Group " + "ABCD"[i];
   const pct = p => Math.round(p * 100) + "%";
-  const KEY = "placevote-hollins-v2";
+  const KEY = "placevote-hollins-v3";
 
   // ---------- the simulated neighbourhood (fixed seed, so the same for every visitor) ----------
   const sim = E.simulate(D.groupSpec, 7);
@@ -15,9 +15,9 @@
   const SEEDN = D.statements.length;
 
   // ---------- visitor state ----------
-  let S = { tab: "ideas", votes: {}, mine: [], extra: [], sel: null, adding: false, draft: null, voteId: null, view: -1, outcome: null };
-  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) Object.assign(S, { votes: saved.votes || {}, mine: saved.mine || [], extra: saved.extra || [] }); } catch (e) {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ votes: S.votes, mine: S.mine, extra: S.extra })); } catch (e) {} };
+  let S = { tab: "ideas", votes: {}, mine: [], extra: [], held: [], sel: null, adding: false, draft: null, voteId: null, view: -1, outcome: null };
+  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) Object.assign(S, { votes: saved.votes || {}, mine: saved.mine || [], extra: saved.extra || [], held: saved.held || [] }); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ votes: S.votes, mine: S.mine, extra: S.extra, held: S.held })); } catch (e) {} };
 
   function statements() {
     const base = D.statements.map(s => ({
@@ -193,7 +193,7 @@
   });
   function selectPin(id) {
     if (S.tab === "vote") { S.voteId = id; }
-    else if (S.tab === "results") { S.sel = S.sel === id ? null : id; }
+    else if (S.tab === "results" || S.tab === "officer") { S.sel = S.sel === id ? null : id; }
     else { S.tab = "ideas"; S.sel = S.sel === id ? null : id; S.outcome = null; }
     render();
   }
@@ -245,37 +245,70 @@
     return h;
   }
 
+  const metres = d => d === null || d === undefined ? "" : `${Math.round(d * E.M_PER_UNIT / 50) * 50} m`;
   function outcomeCard(o) {
+    if (o.action === "held") {
+      return `<section class="card" style="border-color:var(--accent)"><h3>Held for an officer to review</h3>
+        <p>${esc(o.why)}</p><p class="small mute">It won't go to the vote as written. You'll see it in the Officer view tab, which is what a Board officer would work from.</p>
+        <button class="btn" data-act="tab" data-tab="officer">See the Officer view</button></section>`;
+    }
     const s = byId(o.into);
-    const rows = o.ranked.map(r => { const t = byId(r.id); return `<div class="match"><span><b>${r.id}</b> ${esc(t ? t.text : "")}</span><div class="bar" style="grid-template-columns:minmax(0,1fr) 2.6em"><div class="tr"><i style="width:${Math.round(r.score * 100)}%;background:var(--accent)"></i></div><b>${r.score.toFixed(2)}</b></div></div>`; }).join("");
+    const rows = o.ranked.map(r => { const t = byId(r.id); return `<div class="why"><span class="num">${r.id}</span><span><b>${esc(t ? t.text : "")}</b><br><span class="small" style="color:${r.ok ? "var(--agree)" : "var(--mute)"}">${esc(r.reason)}</span></span></div>`; }).join("");
+    const sep = (o.related || []).filter(r => /separate site/.test(r.reason));
+    const opp = (o.related || []).filter(r => /opposite/.test(r.reason));
+    let body;
+    if (o.disputed) body = `Done. Your idea is now its own statement, “${esc(s.text)}”, and the officer has been told the automatic merge got it wrong.`;
+    else if (o.action === "merge") body = `It's the same topic and the same place as “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`;
+    else body = `Nothing existing was the same idea in the same place, so it became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`;
+    let extra = "";
+    if (sep.length) extra += `<p class="small">There's a similar idea elsewhere: ${sep.map(r => `<b>${r.id}</b> (${metres(r.distance)} away)`).join(", ")}. They stay as separate statements so people can back one site and not the other. The officer sees them grouped under the same topic.</p>`;
+    if (opp.length) extra += `<p class="small">An opposite view already exists here: ${opp.map(r => `<b>${r.id}</b>`).join(", ")}. Both stay on the list so the vote shows the split.</p>`;
     return `<section class="card" style="border-color:var(--accent)">
       <h3>${o.action === "merge" ? `Merged into statement ${o.into}` : `New statement ${o.into} added to the vote`}</h3>
-      <p>${o.action === "merge"
-        ? `Your idea was close in wording and place to “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`
-        : `Nothing existing was close enough, so your idea became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`}</p>
+      <p>${body}</p>${extra}
       <details><summary>Show how it was matched</summary>
-        <p class="small mute">Closest existing statements, scored 0 to 1 on shared wording (65%) and closeness on the map (35%). Distance is measured between shapes, so an idea inside an area or along a route counts as close. Whole-area ideas are only close to other whole-area ideas. Merging needs a score of 0.32 or more with some shared wording.</p>${rows}</details>
-      <div style="margin-top:10px"><button class="btn" data-act="voteon" data-id="${o.into}">Vote on it</button></div></section>`;
+        <p class="small mute">Each idea is read for its topic (what it's about), its place (point, route, area or whole area) and its direction (for or against). It merges only if all three line up. Places more than about ${Math.round(E.SAME_PLACE * E.M_PER_UNIT / 10) * 10} m apart stay separate, and opposite views never merge.</p>${rows || '<p class="small">No similar statements.</p>'}</details>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" data-act="voteon" data-id="${o.into}">Vote on it</button>
+      ${o.action === "merge" ? `<button class="btn" data-act="dispute">That's not what I meant</button>` : ""}</div></section>`;
   }
 
   function submitIdea() {
     const text = $("#idea").value, cat = $("#cat").value;
-    const problem = E.moderate(text);
-    if (problem) { $("#err").textContent = problem; return; }
+    const mod = E.moderate(text);
+    if (mod && mod.block) { $("#err").textContent = mod.block; return; }
     if (!draftOK()) { $("#err").textContent = { point: "Tap the map to place your idea first.", line: "Tap at least two points to draw the route.", area: "Tap at least three corners to draw the area." }[S.draft.type]; return; }
     const geom = { type: S.draft.type, pts: S.draft.pts.slice() };
+    const done = () => { S.adding = false; S.draft = null; S.text = ""; S.sel = null; save(); render(); };
+    if (mod && mod.review) {
+      S.held.push({ geom, text: text.trim(), cat, why: "About a group of people, not a place or service" });
+      S.outcome = { action: "held", why: mod.review }; return done();
+    }
     const all = statements();
     const res = E.consolidate({ geom, text }, all.map(s => ({ ...s, sources: s.sources.map(r => r.text) })));
+    if (res.action === "review") {
+      S.held.push({ geom, text: text.trim(), cat, why: "Unclear whether it's for or against statement " + res.ranked.find(r => r.unclear).id });
+      S.outcome = { action: "held", why: "This is close to an existing statement, but it isn't clear whether you're for or against it. An officer will check, so your idea isn't counted the wrong way." };
+      return done();
+    }
     let into;
     if (res.action === "merge") into = res.match.id;
-    else {
-      into = Math.max(...all.map(s => s.id)) + 1;
-      const at = E.anchor(geom);
-      S.extra.push({ id: into, x: at ? at[0] : null, y: at ? at[1] : null, geom, cat, place: geom.type === "wide" ? "Whole area" : "", text: E.tidy(text) });
-    }
+    else into = newStatement(geom, cat, text);
     S.mine.push({ geom, text: text.trim(), cat, into });
-    S.outcome = { action: res.action, into, ranked: res.ranked };
-    S.adding = false; S.draft = null; S.text = ""; S.sel = null;
+    S.outcome = { action: res.action, into, ranked: res.ranked, related: res.related, mine: S.mine.length - 1 };
+    done();
+  }
+  function newStatement(geom, cat, text) {
+    const into = Math.max(...statements().map(s => s.id)) + 1;
+    const at = E.anchor(geom);
+    S.extra.push({ id: into, x: at ? at[0] : null, y: at ? at[1] : null, geom, cat, place: geom.type === "wide" ? "Whole area" : "", text: E.tidy(text) });
+    return into;
+  }
+  // "That's not what I meant": undo the merge, make the idea its own statement, flag it for the officer.
+  function dispute() {
+    const o = S.outcome, m = S.mine[o.mine]; if (!m) return;
+    m.disputedFrom = m.into;
+    m.into = newStatement(m.geom, m.cat, m.text);
+    S.outcome = { action: "new", into: m.into, ranked: [], related: [], disputed: true };
     save(); render();
   }
 
@@ -402,13 +435,51 @@
     return h;
   }
 
+  // ---------- officer view ----------
+  function topicBoard() {
+    const list = statements(), by = {};
+    list.forEach(st => {
+      const k = E.mainTopic([st.text].concat(st.sources.map(r => r.text))) || "other";
+      (by[k] = by[k] || []).push(st);
+    });
+    return Object.keys(by).map(k => {
+      const sts = by[k], flags = [];
+      for (let i = 0; i < sts.length; i++) for (let j = i + 1; j < sts.length; j++) {
+        const a = sts[i], b = sts[j], c = E.compare({ x: a.x, y: a.y, geom: a.geom, text: a.text }, { ...b, sources: [] });
+        if (c.opposed.length) flags.push({ kind: "opp", text: `<b>${a.id}</b> and <b>${b.id}</b> are opposite views. Both stay on the list so the vote shows the split.` });
+        else if (c.sameTopic && /separate site/.test(c.reason)) flags.push({ kind: "site", text: `<b>${a.id}</b> and <b>${b.id}</b> are the same idea in different places (${metres(c.distance)} apart). Keep them separate if the choice of site is contested; otherwise combine them into one whole-area statement.` });
+      }
+      return { key: k, name: k === "other" ? "Other" : E.topicName(k), sts, ideas: sts.reduce((n, x) => n + x.sources.length, 0), flags };
+    }).sort((a, b) => (b.flags.length - a.flags.length) || (b.ideas - a.ideas));
+  }
+
+  function officerPanel() {
+    const board = topicBoard();
+    const held = D.held.map(h => ({ ...h, seed: true, why: "About a group of people, not a place or service" })).concat(S.held);
+    const disputed = S.mine.filter(m => m.disputedFrom);
+    const flagged = board.reduce((n, t) => n + t.flags.length, 0);
+    let h = `<section><h2>Officer view</h2>
+      <p>What a Neighbourhood Board officer works from: every idea sorted into topics, with anything that needs a human decision flagged. In the full version, an AI model drafts the merged statements and the officer approves, edits, splits or combines them here.</p>
+      <div class="stats"><div class="stat"><b>${board.length}</b><span>topics</span></div><div class="stat"><b>${statements().length}</b><span>statements</span></div><div class="stat"><b>${held.length + disputed.length + flagged}</b><span>need a decision</span></div></div></section>`;
+
+    h += `<section><h3>Held for review</h3>${held.length ? `<ul class="list">${held.map(x => `<li class="row" style="cursor:default"><span class="t">“${esc(x.text)}”<br><span class="small" style="color:var(--accent)">${esc(x.why)}</span>${x.suggestion ? `<br><span class="small">Suggested rewording: <b>${esc(x.suggestion)}</b></span>` : ""}</span>${x.seed ? "" : '<span class="tag you">yours</span>'}</li>`).join("")}</ul>` : '<p class="small mute">Nothing waiting.</p>'}</section>`;
+
+    if (disputed.length) h += `<section><h3>Residents who disputed a merge</h3><ul class="list">${disputed.map(m => `<li class="row" style="cursor:default"><span class="t">“${esc(m.text)}”<br><span class="small">Was merged into <b>${m.disputedFrom}</b>, now its own statement <b>${m.into}</b>. Check whether the merge rule needs adjusting.</span></span><span class="tag you">yours</span></li>`).join("")}</ul></section>`;
+
+    h += `<section><h3>Topics</h3><p class="small mute">Grouped by what each statement is about, regardless of place. Topics with flags come first.</p>${board.map(t => `
+      <div class="topic"><div class="topic-h"><b>${esc(t.name)}</b><span class="small mute">${t.ideas} idea${t.ideas === 1 ? "" : "s"} · ${t.sts.length} statement${t.sts.length === 1 ? "" : "s"}</span></div>
+        ${t.flags.map(f => `<p class="flag ${f.kind}">${f.text}</p>`).join("")}
+        <ul class="list">${t.sts.map(st => `<li class="row${S.sel === st.id ? " on-row" : ""}" tabindex="0" data-opick="${st.id}"><span class="num">${st.id}</span><span class="t">${esc(st.text)}<br><span class="small mute">${esc(st.place || "New this round")} · ${st.sources.length} idea${st.sources.length === 1 ? "" : "s"}</span></span>${shapeTag(st)}${st.isNew ? '<span class="tag you">new</span>' : ""}</li>`).join("")}</ul></div>`).join("")}</section>`;
+    return h;
+  }
+
   // ---------- how it works ----------
   function howPanel() {
     return `<section><h2>How it works</h2>
       <p>PlaceVote joins two things that usually live apart: a map where residents say what should change and where (participatory GIS), and the pol.is method for finding consensus across a large group.</p>
       <ol class="steps">
         <li><b>Share ideas on the map.</b> Residents pin an idea to a spot, draw it along a route, mark out an area, or add a whole-area idea that covers the neighbourhood, such as a policy or how the Board works.</li>
-        <li><b>Merge overlapping ideas.</b> Hundreds of scattered pins can't be voted on fairly, so similar ideas in similar places are merged into one clear statement. This demo matches on shared wording and the distance between shapes; whole-area ideas are matched with each other. The full version uses an AI model to write the merged statement, with a person checking it.</li>
+        <li><b>Merge overlapping ideas, carefully.</b> Hundreds of scattered pins can't be voted on fairly, so ideas are merged, but only when three things line up: the same topic ("loos" and "toilets" count as the same), the same place (separate sites more than about 200 m apart stay separate), and the same direction (opposite views like "keep the park open at night" and "close it" never merge). Ideas aimed at a group of people, or where it's unclear whether they're for or against, are held for an officer. Residents can undo a merge they disagree with. This demo reads topics and direction with a built-in dictionary; the full version would use an AI model, with an officer approving its drafts.</li>
         <li><b>Everyone votes on the same list.</b> Agree, disagree or unsure. Because everyone sees the same statements, the votes can be compared.</li>
         <li><b>Find opinion groups.</b> The vote table is compressed to two dimensions (principal component analysis) and grouped with k-means. The number of groups is chosen by silhouette score, as pol.is does.</li>
         <li><b>Find common ground.</b> A statement counts as common ground only if <i>every</i> group tends to agree, so a large group can't outvote a small one.</li>
@@ -428,7 +499,7 @@
     document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === S.tab));
     $("#voteCount").textContent = Object.keys(S.votes).length;
     const P = $("#panel");
-    P.innerHTML = S.tab === "ideas" ? ideasPanel() : S.tab === "vote" ? votePanel() : S.tab === "results" ? resultsPanel() : howPanel();
+    P.innerHTML = S.tab === "ideas" ? ideasPanel() : S.tab === "vote" ? votePanel() : S.tab === "results" ? resultsPanel() : S.tab === "officer" ? officerPanel() : howPanel();
     drawPins();
     if (S.tab === "results") scatter();
   }
@@ -442,11 +513,12 @@
   $("#panel").addEventListener("change", e => { if (e.target.id === "cat") S.cat = e.target.value; });
 
   $("#panel").addEventListener("click", e => {
-    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-view],[data-mode]"); if (!t) return;
+    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-opick],[data-view],[data-mode]"); if (!t) return;
     const d = t.dataset;
     if (d.vote !== undefined) return castVote(+d.vote);
     if (d.pick) { S.sel = +d.pick; S.outcome = null; render(); return; }
     if (d.votepick) { S.voteId = +d.votepick; render(); return; }
+    if (d.opick) { S.sel = S.sel === +d.opick ? null : +d.opick; render(); return; }
     if (d.rpick) { S.sel = S.sel === +d.rpick ? null : +d.rpick; drawPins(); return; }
     if (d.view !== undefined) { S.view = +d.view; render(); return; }
     if (d.mode) {
@@ -463,6 +535,7 @@
         break;
       case "cancel": S.adding = false; S.draft = null; render(); break;
       case "submit": submitIdea(); break;
+      case "dispute": dispute(); break;
       case "close": S.sel = null; render(); break;
       case "voteon": S.tab = "vote"; S.voteId = +d.id; S.sel = null; S.outcome = null; render(); break;
       case "tab": S.tab = d.tab; render(); break;
