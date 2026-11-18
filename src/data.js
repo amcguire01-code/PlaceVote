@@ -49,7 +49,9 @@ var PV_DATA = {
     { id: 15, cat: "Services",       x: null, y: null, place: "Whole area", geom: { type: "wide" },
       text: "Publish every Board decision and what it spends, online and in plain English." },
     { id: 16, cat: "Environment",    x: null, y: null, place: "Whole area", geom: { type: "wide" },
-      text: "Set up a community-owned energy scheme with solar panels on public buildings." }
+      text: "Set up a community-owned energy scheme with solar panels on public buildings." },
+    { id: 17, cat: "Services",       x: 238, y: 402, place: "Hollins Park (playground)",
+      text: "Provide public toilets in Hollins Park, open during daylight hours." }
   ],
 
   // The raw map contributions each statement was consolidated from (shown in "How we got here").
@@ -88,15 +90,23 @@ var PV_DATA = {
     [15, null, null, "nobody knows what the board actually decides or spends"],
     [15, null, null, "post the minutes and the budget somewhere we can read them"],
     [16, null, null, "solar panels on the school and library roofs"],
-    [16, null, null, "community owned energy like they have in Bristol"]
+    [16, null, null, "community owned energy like they have in Bristol"],
+    [17, 225, 410, "no toilets in the park so families with little ones have to go home"],
+    [17, 250, 395, "public loos by the playground please"]
+  ],
+
+  // Ideas held for an officer: about a group of people rather than a place or service.
+  held: [
+    { x: 432, y: 515, text: "get rid of the homeless people hanging around the parade",
+      suggestion: "More support for people sleeping rough near the Brookside parade, with outreach from local services." }
   ],
 
   // How each simulated group leans on each statement (-1 strongly against .. 1 strongly for).
   // The clustering never sees these labels: it has to rediscover the groups from votes alone.
   groupSpec: [
-    { n: 52, lean: [0.8, -0.7, 0.8, -0.3, 0.7, 0.6, 0.1, -0.4, 0.9, 0.8, 0.0, -0.6, 0.8, 0.3, 0.8, -0.2] },
-    { n: 46, lean: [0.9, 0.8, -0.6, 0.9, 0.8, 0.9, 0.6, 0.6, 0.4, 0.7, 0.7, 0.3, -0.5, 0.8, 0.9, 0.9] },
-    { n: 30, lean: [0.7, 0.3, 0.9, 0.4, 0.6, 0.5, 0.9, 0.6, -0.4, 0.6, 0.4, 0.9, -0.1, 0.6, 0.8, 0.6] }
+    { n: 52, lean: [0.8, -0.7, 0.8, -0.3, 0.7, 0.6, 0.1, -0.4, 0.9, 0.8, 0.0, -0.6, 0.8, 0.3, 0.8, -0.2, 0.7] },
+    { n: 46, lean: [0.9, 0.8, -0.6, 0.9, 0.8, 0.9, 0.6, 0.6, 0.4, 0.7, 0.7, 0.3, -0.5, 0.8, 0.9, 0.9, 0.6] },
+    { n: 30, lean: [0.7, -0.3, 0.9, 0.1, 0.6, 0.5, 0.9, 0.8, -0.7, 0.6, 0.4, 0.9, 0.3, 0.6, 0.8, 0.7, 0.8] }
   ]
 };
 
