@@ -29,8 +29,33 @@ with sync_playwright() as p:
         pg.click("[data-act='submit']"); pg.wait_for_timeout(200)
         print(name, "new:", pg.locator(".card h3").first.inner_text())
         pg.screenshot(path=str(out / f"{name}-3-outcome.png"), full_page=True)
+        # draw a route
+        pg.click("[data-act='add']"); pg.click("[data-mode='line']"); pg.wait_for_timeout(600)
+        box = pg.locator("#map").bounding_box()
+        for fx, fy in [(0.45, 0.92), (0.45, 0.62), (0.62, 0.42), (0.72, 0.15)]:
+            pg.mouse.click(box["x"] + box["width"] * fx, box["y"] + box["height"] * fy)
+        pg.screenshot(path=str(out / f"{name}-3b-drawing.png"), full_page=False)
+        pg.click("#legend [data-act='done']")
+        pg.fill("#idea", "safe bike route up to the train station")
+        pg.click("[data-act='submit']"); pg.wait_for_timeout(200)
+        print(name, "route:", pg.locator(".card h3").first.inner_text())
+        # draw an area
+        pg.click("[data-act='add']"); pg.click("[data-mode='area']"); pg.wait_for_timeout(600)
+        box = pg.locator("#map").bounding_box()
+        for fx, fy in [(0.86, 0.75), (0.97, 0.75), (0.97, 0.95), (0.86, 0.95)]:
+            pg.mouse.click(box["x"] + box["width"] * fx, box["y"] + box["height"] * fy)
+        pg.click("#legend [data-act='done']")
+        pg.fill("#idea", "Turn part of the retail park car park into a pump track for teenagers")
+        pg.click("[data-act='submit']"); pg.wait_for_timeout(200)
+        print(name, "area:", pg.locator(".card h3").first.inner_text())
+        # whole-area idea
+        pg.click("[data-act='add']"); pg.click("[data-mode='wide']")
+        pg.fill("#idea", "The board should publish its decisions and budget online")
+        pg.click("[data-act='submit']"); pg.wait_for_timeout(200)
+        print(name, "wide:", pg.locator(".card h3").first.inner_text())
+        pg.screenshot(path=str(out / f"{name}-3c-shapes.png"), full_page=True)
         pg.click("[data-tab='vote']")
-        for v in ["1","1","-1","1","1","1","0","-1","1","1","1","0","1","1","1"]:
+        for v in ["1","1","-1","1","1","1","0","-1","1","1","1","0","1","1","1","1","1","1","1"]:
             if pg.locator(f"[data-vote='{v}']").count(): pg.click(f"[data-vote='{v}']")
         pg.screenshot(path=str(out / f"{name}-4-vote.png"), full_page=True)
         pg.click("#tabs [data-tab='results']"); pg.wait_for_timeout(400)

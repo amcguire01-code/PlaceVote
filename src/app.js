@@ -6,7 +6,7 @@
   const GCOL = ["var(--gA)", "var(--gB)", "var(--gC)", "var(--gD)"];
   const GNAME = i => "Group " + "ABCD"[i];
   const pct = p => Math.round(p * 100) + "%";
-  const KEY = "placevote-hollins-v1";
+  const KEY = "placevote-hollins-v2";
 
   // ---------- the simulated neighbourhood (fixed seed, so the same for every visitor) ----------
   const sim = E.simulate(D.groupSpec, 7);
@@ -84,58 +84,112 @@
   function shade(p, col) { return `color-mix(in srgb, ${col} ${Math.round(12 + p * 88)}%, var(--bg))`; }
   function statForId(id) { const i = D.statements.findIndex(s => s.id === id); return i < 0 ? null : A.stats[i]; }
 
+  const shapeOf = s => E.shapeOf(s.geom ? s : { x: s.x, y: s.y });
+  const SHAPE_NAME = { line: "Route", area: "Area", wide: "Whole area" };
+  const shapeTag = s => { const t = shapeOf(s).type; return SHAPE_NAME[t] ? `<span class="tag">${SHAPE_NAME[t]}</span>` : ""; };
+  const pathD = (pts, close) => "M" + pts.map(p => p[0] + " " + p[1]).join("L") + (close ? "Z" : "");
+
+  // colour for a statement: default ink, or share who agree in results view
+  function colourFor(s) {
+    if (S.tab !== "results") return { fill: "var(--ink)", txt: "var(--bg)", title: s.text, p: null };
+    const st = statForId(s.id);
+    if (!st) return { fill: "var(--bg)", txt: "var(--mute)", title: s.text + " (new: no votes from others yet)", p: null };
+    const g = S.view < 0 ? st.all : st.groups[S.view];
+    const col = S.view < 0 ? "var(--agree)" : GCOL[S.view];
+    return { fill: shade(g.pa, col), txt: g.pa > 0.55 ? "#fff" : "var(--ink)", title: `${s.text} (${pct(g.pa)} agree${S.view < 0 ? "" : " in " + GNAME(S.view)})`, p: g.pa };
+  }
+
   function drawPins() {
     const list = statements();
     const focus = S.tab === "vote" ? currentVoteId() : null;
-    let html = list.map(s => {
-      let fill = "var(--ink)", txt = "var(--bg)", cls = "pin", title = s.text;
-      if (S.tab === "results") {
-        const st = statForId(s.id);
-        if (st) {
-          const g = S.view < 0 ? st.all : st.groups[S.view];
-          const col = S.view < 0 ? "var(--agree)" : GCOL[S.view];
-          fill = shade(g.pa, col); txt = g.pa > 0.55 ? "#fff" : "var(--ink)";
-          title = `${s.text} (${pct(g.pa)} agree${S.view < 0 ? "" : " in " + GNAME(S.view)})`;
-        } else { fill = "var(--bg)"; txt = "var(--mute)"; }
+    const focusWide = focus !== null && shapeOf(byId(focus)).type === "wide";
+    let shapes = "", pins = "";
+    list.forEach(s => {
+      const g = shapeOf(s), c = colourFor(s);
+      const on = S.sel === s.id || focus === s.id;
+      const dim = focus !== null && s.id !== focus ? " dim" : "";
+      if (g.type === "wide") return; // shown in the whole-area strip, not on the map
+      const res = S.tab === "results";
+      if (g.type === "line") {
+        shapes += `<g class="shape${dim}" data-id="${s.id}"><title>${esc(c.title)}</title><path d="${pathD(g.pts)}" fill="none" stroke="var(--bg)" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/><path d="${pathD(g.pts)}" fill="none" stroke="${on ? "var(--accent)" : res ? c.fill : "var(--ink)"}" stroke-width="${on ? 9 : 7}" stroke-linejoin="round" stroke-linecap="round" ${res ? "" : 'stroke-dasharray="14 8"'} opacity="${res || on ? 1 : 0.7}"/></g>`;
+      } else if (g.type === "area") {
+        shapes += `<g class="shape${dim}" data-id="${s.id}"><title>${esc(c.title)}</title><path d="${pathD(g.pts, true)}" fill="${res ? c.fill : "var(--ink)"}" fill-opacity="${res ? 0.55 : on ? 0.16 : 0.08}" stroke="${on ? "var(--accent)" : res ? c.fill : "var(--ink)"}" stroke-width="${on ? 5 : 3}" stroke-dasharray="${res ? "" : "10 6"}" stroke-linejoin="round"/></g>`;
       }
-      if (focus !== null && s.id !== focus) cls += " dim";
-      if (S.sel === s.id || focus === s.id) cls += " sel";
-      const r = (S.sel === s.id || focus === s.id) ? 20 : 16;
-      return `<g class="${cls}" data-id="${s.id}" tabindex="0" role="button" aria-label="Statement ${s.id}: ${esc(s.text)}"><title>${esc(title)}</title><circle cx="${s.x}" cy="${s.y}" r="${r}" fill="${fill}" ${s.isNew ? 'stroke-dasharray="4 3"' : ""}/><text x="${s.x}" y="${s.y + 1}" fill="${txt}">${s.id}</text></g>`;
-    }).join("");
-    if (S.draft) html += `<g class="draft"><circle cx="${S.draft.x}" cy="${S.draft.y}" r="12"/><circle cx="${S.draft.x}" cy="${S.draft.y}" r="26" fill="none" stroke="var(--accent)" stroke-width="3" opacity=".6"/></g>`;
-    $("#pins").innerHTML = html;
-    map.classList.toggle("adding", S.adding);
+      pins += `<g class="pin${dim}${on ? " sel" : ""}" data-id="${s.id}" tabindex="0" role="button" aria-label="Statement ${s.id}: ${esc(s.text)}"><title>${esc(c.title)}</title><circle cx="${s.x}" cy="${s.y}" r="${on ? 20 : 16}" fill="${c.fill}" ${s.isNew ? 'stroke-dasharray="4 3"' : ""}/><text x="${s.x}" y="${s.y + 1}" fill="${c.txt}">${s.id}</text></g>`;
+    });
+    let draft = "";
+    if (S.adding && S.draft && S.draft.pts.length) {
+      const d = S.draft, pts = d.pts;
+      if (d.type === "line" && pts.length > 1) draft += `<path d="${pathD(pts)}" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>`;
+      if (d.type === "area" && pts.length > 1) draft += `<path d="${pathD(pts, pts.length > 2)}" fill="var(--accent)" fill-opacity=".22" stroke="var(--accent)" stroke-width="4" stroke-linejoin="round"/>`;
+      if (d.type === "point") draft += `<circle cx="${pts[0][0]}" cy="${pts[0][1]}" r="26" fill="none" stroke="var(--accent)" stroke-width="3" opacity=".6"/><circle cx="${pts[0][0]}" cy="${pts[0][1]}" r="12"/>`;
+      else draft += pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="${i === pts.length - 1 ? 9 : 7}"/>`).join("");
+    }
+    $("#pins").innerHTML = shapes + pins + `<g class="draft">${draft}</g>`;
+    map.classList.toggle("adding", S.adding && S.draft && S.draft.type !== "wide");
+    map.classList.toggle("whole", focusWide || (S.adding && S.draft && S.draft.type === "wide"));
+
+    // whole-area strip under the map
+    const wide = list.filter(s => shapeOf(s).type === "wide");
+    $("#wide").innerHTML = wide.length ? `<h3>Whole-area ideas <span class="small mute" style="font-weight:400">· apply to all of Hollins Green</span></h3><div class="wlist">${wide.map(s => {
+      const c = colourFor(s), on = S.sel === s.id || focus === s.id;
+      return `<button class="wpill${on ? " sel" : ""}${focus !== null && !on ? " dim" : ""}" data-id="${s.id}" title="${esc(c.title)}"><span class="num" style="background:${c.fill};color:${c.txt}">${s.id}</span><span>${esc(s.text)}</span>${c.p !== null ? `<b>${pct(c.p)}</b>` : ""}</button>`;
+    }).join("")}</div>` : "";
 
     const lg = $("#legend");
     if (S.tab === "results") {
       const col = S.view < 0 ? "var(--agree)" : GCOL[S.view];
-      lg.innerHTML = `<span>Pin colour: share of ${S.view < 0 ? "all residents" : GNAME(S.view)} who agree</span><span>0%</span><span class="ramp" style="background:linear-gradient(90deg,${shade(0, col)},${shade(1, col)})"></span><span>100%</span>`;
-    } else if (S.adding) {
-      lg.innerHTML = `<span style="color:var(--accent);font-weight:600">${S.draft ? "Pin placed. Move it by tapping somewhere else." : "Tap the map where your idea applies."}</span>`;
+      lg.innerHTML = `<span>Colour: share of ${S.view < 0 ? "all residents" : GNAME(S.view)} who agree</span><span>0%</span><span class="ramp" style="background:linear-gradient(90deg,${shade(0, col)},${shade(1, col)})"></span><span>100%</span>`;
+    } else if (S.adding && S.draft) {
+      const d = S.draft, n = d.pts.length;
+      const msg = {
+        point: n ? "Pin placed. Tap somewhere else to move it." : "Tap the map where your idea applies.",
+        line: n ? `Route: ${n} point${n === 1 ? "" : "s"}. Keep tapping along it${n >= 2 ? ", or tap Done" : ""}.` : "Tap the start of the route, then each turn along it.",
+        area: n ? `Area: ${n} corner${n === 1 ? "" : "s"}. Keep tapping round the edge${n >= 3 ? ", or tap Done" : ""}.` : "Tap round the edge of the area, corner by corner.",
+        wide: "No need to use the map: this idea covers the whole of Hollins Green."
+      }[d.type];
+      const tools = (d.type === "line" || d.type === "area") && n ? `<button class="btn mini" data-act="undo">Undo point</button><button class="btn mini primary" data-act="done" ${draftOK() ? "" : "disabled"}>Done</button>` : "";
+      lg.innerHTML = `<span style="color:var(--accent);font-weight:600">${msg}</span>${tools}`;
+    } else if (focusWide) {
+      lg.innerHTML = `<span style="color:var(--accent);font-weight:600">This idea applies to the whole of Hollins Green.</span>`;
     } else {
-      lg.innerHTML = `<span>Each numbered pin is one statement residents can vote on. Select a pin to see the ideas it was built from.</span>`;
+      lg.innerHTML = `<span>Pins, dashed routes and dashed areas are statements residents vote on. Select one to see the ideas it was built from.</span>`;
     }
+  }
+  function draftOK() {
+    const d = S.draft; if (!d) return false;
+    return d.type === "wide" || (d.type === "point" && d.pts.length === 1) || (d.type === "line" && d.pts.length >= 2) || (d.type === "area" && d.pts.length >= 3);
   }
 
   function svgPoint(evt) {
     const pt = map.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
     const p = pt.matrixTransform(map.getScreenCTM().inverse());
-    return { x: Math.round(Math.max(10, Math.min(990, p.x))), y: Math.round(Math.max(10, Math.min(630, p.y))) };
+    return [Math.round(Math.max(10, Math.min(990, p.x))), Math.round(Math.max(10, Math.min(630, p.y)))];
   }
+  const toForm = () => {
+    const t = $("#idea");
+    if (t) { if (window.innerWidth <= 860) t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus({ preventScroll: true }); }
+  };
   map.addEventListener("click", e => {
-    if (S.adding) {
-      S.draft = svgPoint(e); render();
-      const t = $("#idea");
-      if (t) { if (window.innerWidth <= 860) t.scrollIntoView({ behavior: "smooth", block: "center" }); t.focus({ preventScroll: true }); }
+    if (S.adding && S.draft && S.draft.type !== "wide") {
+      const p = svgPoint(e);
+      if (S.draft.type === "point") { S.draft.pts = [p]; render(); toForm(); }
+      else { S.draft.pts.push(p); render(); }
       return;
     }
-    const g = e.target.closest(".pin"); if (!g) return;
+    if (S.adding) return;
+    const g = e.target.closest(".pin,.shape"); if (!g) return;
     selectPin(+g.dataset.id);
   });
   map.addEventListener("keydown", e => {
     const g = e.target.closest && e.target.closest(".pin");
     if (g && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selectPin(+g.dataset.id); }
+  });
+  $("#wide").addEventListener("click", e => { const b = e.target.closest(".wpill"); if (b && !S.adding) selectPin(+b.dataset.id); });
+  $("#legend").addEventListener("click", e => {
+    const b = e.target.closest("[data-act]"); if (!b || !S.draft) return;
+    if (b.dataset.act === "undo") { S.draft.pts.pop(); render(); }
+    if (b.dataset.act === "done") toForm();
   });
   function selectPin(id) {
     if (S.tab === "vote") { S.voteId = id; }
@@ -145,39 +199,48 @@
   }
 
   // ---------- step 1: ideas ----------
+  const MODES = [["point", "Point", "A specific spot"], ["line", "Route", "A street, path or route"], ["area", "Area", "A zone or patch of land"], ["wide", "Whole area", "A policy for all of Hollins Green"]];
   function ideasPanel() {
     const list = statements();
     const rawN = D.raw.length + S.mine.length;
     let h = `<section><h2>Ideas on the map</h2>
-      <p>${NRES} residents dropped ${rawN} ideas on the map. Overlapping ideas were merged into ${list.length} statements, so everyone votes on the same short list.</p>
-      ${S.adding ? "" : `<button class="btn primary" data-act="add">Add your idea to the map</button>`}</section>`;
+      <p>${NRES} residents shared ${rawN} ideas: pinned to spots, drawn along routes, marked as areas, or for the whole neighbourhood. Overlapping ideas were merged into ${list.length} statements, so everyone votes on the same short list.</p>
+      ${S.adding ? "" : `<button class="btn primary" data-act="add">Add your idea</button>`}</section>`;
 
     if (S.adding) {
+      const d = S.draft, wide = d.type === "wide";
+      const hint = {
+        point: d.pts.length ? "Pin placed on the map." : "Tap the map where your idea applies.",
+        line: d.pts.length >= 2 ? `Route drawn with ${d.pts.length} points.` : "Tap along the route on the map, point by point.",
+        area: d.pts.length >= 3 ? `Area drawn with ${d.pts.length} corners.` : "Tap round the edge of the area on the map.",
+        wide: "This idea will apply to the whole of Hollins Green."
+      }[d.type];
       h += `<section class="card"><h3>Your idea</h3>
-        <p class="small mute">${S.draft ? "Pin placed on the map." : "First, tap the map where your idea applies."}</p>
-        <label for="idea">What should change here?</label>
-        <textarea id="idea" maxlength="240" placeholder="e.g. The bus stop on Market Street needs a shelter and a bench">${esc(S.text || "")}</textarea>
+        <div class="seg" role="radiogroup" aria-label="What does your idea cover?">${MODES.map(m => `<button role="radio" aria-checked="${d.type === m[0]}" data-mode="${m[0]}"><b>${m[1]}</b><span>${m[2]}</span></button>`).join("")}</div>
+        <p class="small" style="color:${draftOK() ? "var(--agree)" : "var(--accent)"};font-weight:600">${hint}</p>
+        <label for="idea">${wide ? "What should change across Hollins Green?" : "What should change here?"}</label>
+        <textarea id="idea" maxlength="240" placeholder="${wide ? "e.g. Hold Board meetings in the evening so people who work can come" : "e.g. The bus stop on Market Street needs a shelter and a bench"}">${esc(S.text || "")}</textarea>
         <label for="cat">Topic</label>
         <select id="cat">${D.categories.map(c => `<option${c === S.cat ? " selected" : ""}>${c}</option>`).join("")}</select>
         <div class="err" id="err"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-          <button class="btn primary" data-act="submit" ${S.draft ? "" : "disabled"}>Add to the map</button>
+          <button class="btn primary" data-act="submit" ${draftOK() ? "" : "disabled"}>Add idea</button>
           <button class="btn" data-act="cancel">Cancel</button></div>
-        <p class="small mute">Please keep to the place, not people: no names, addresses or contact details.</p></section>`;
+        <p class="small mute">Please keep to places and policies, not people: no names, addresses or contact details.</p></section>`;
     }
 
     if (S.outcome) h += outcomeCard(S.outcome);
 
     if (S.sel !== null && byId(S.sel)) {
       const s = byId(S.sel);
-      h += `<section class="card"><div class="meta"><span class="num">${s.id}</span><span>${esc(s.place || "New this round")}</span><span class="tag">${esc(s.cat)}</span></div>
+      h += `<section class="card"><div class="meta"><span class="num">${s.id}</span><span>${esc(s.place || "New this round")}</span>${shapeTag(s)}<span class="tag">${esc(s.cat)}</span></div>
         <p class="stmt">${esc(s.text)}</p>
         <h3 style="margin-top:14px">Built from ${s.sources.length} idea${s.sources.length === 1 ? "" : "s"}</h3>
         ${s.sources.map(r => `<div class="quote${r.you ? " you" : ""}">${r.you ? "<b>You:</b> " : ""}“${esc(r.text)}”</div>`).join("")}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn primary" data-act="voteon" data-id="${s.id}">Vote on this</button><button class="btn" data-act="close">Back to list</button></div></section>`;
     } else {
       h += `<section><h3>All statements</h3><ul class="list">${list.map(s => `
-        <li class="row" tabindex="0" data-pick="${s.id}"><span class="num">${s.id}</span><span class="t">${esc(s.text)}<br><span class="small mute">${esc(s.place || "New this round")} · ${s.sources.length} idea${s.sources.length === 1 ? "" : "s"}</span></span>${s.isNew ? '<span class="tag you">yours</span>' : ""}</li>`).join("")}</ul></section>`;
+        <li class="row" tabindex="0" data-pick="${s.id}"><span class="num">${s.id}</span><span class="t">${esc(s.text)}<br><span class="small mute">${esc(s.place || "New this round")} · ${s.sources.length} idea${s.sources.length === 1 ? "" : "s"}</span></span>${shapeTag(s)}${s.isNew ? '<span class="tag you">yours</span>' : ""}</li>`).join("")}</ul></section>`;
     }
     return h;
   }
@@ -188,10 +251,10 @@
     return `<section class="card" style="border-color:var(--accent)">
       <h3>${o.action === "merge" ? `Merged into statement ${o.into}` : `New statement ${o.into} added to the vote`}</h3>
       <p>${o.action === "merge"
-        ? `Your idea was close in wording and location to “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`
-        : `Nothing on the map was close enough, so your idea became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`}</p>
+        ? `Your idea was close in wording and place to “${esc(s.text)}”, so it now counts as another source for that statement instead of splitting the vote.`
+        : `Nothing existing was close enough, so your idea became a new statement: “${esc(s.text)}”. Other residents would now see it in their voting queue.`}</p>
       <details><summary>Show how it was matched</summary>
-        <p class="small mute">Closest existing statements, scored 0 to 1 on shared wording (65%) and distance on the map (35%). Merge needs a score of 0.32 or more with some shared wording.</p>${rows}</details>
+        <p class="small mute">Closest existing statements, scored 0 to 1 on shared wording (65%) and closeness on the map (35%). Distance is measured between shapes, so an idea inside an area or along a route counts as close. Whole-area ideas are only close to other whole-area ideas. Merging needs a score of 0.32 or more with some shared wording.</p>${rows}</details>
       <div style="margin-top:10px"><button class="btn" data-act="voteon" data-id="${o.into}">Vote on it</button></div></section>`;
   }
 
@@ -199,16 +262,18 @@
     const text = $("#idea").value, cat = $("#cat").value;
     const problem = E.moderate(text);
     if (problem) { $("#err").textContent = problem; return; }
-    if (!S.draft) { $("#err").textContent = "Tap the map to place your idea first."; return; }
+    if (!draftOK()) { $("#err").textContent = { point: "Tap the map to place your idea first.", line: "Tap at least two points to draw the route.", area: "Tap at least three corners to draw the area." }[S.draft.type]; return; }
+    const geom = { type: S.draft.type, pts: S.draft.pts.slice() };
     const all = statements();
-    const res = E.consolidate({ x: S.draft.x, y: S.draft.y, text }, all.map(s => ({ ...s, sources: s.sources.map(r => r.text) })));
+    const res = E.consolidate({ geom, text }, all.map(s => ({ ...s, sources: s.sources.map(r => r.text) })));
     let into;
     if (res.action === "merge") into = res.match.id;
     else {
       into = Math.max(...all.map(s => s.id)) + 1;
-      S.extra.push({ id: into, x: S.draft.x, y: S.draft.y, cat, place: "", text: E.tidy(text) });
+      const at = E.anchor(geom);
+      S.extra.push({ id: into, x: at ? at[0] : null, y: at ? at[1] : null, geom, cat, place: geom.type === "wide" ? "Whole area" : "", text: E.tidy(text) });
     }
-    S.mine.push({ x: S.draft.x, y: S.draft.y, text: text.trim(), cat, into });
+    S.mine.push({ geom, text: text.trim(), cat, into });
     S.outcome = { action: res.action, into, ranked: res.ranked };
     S.adding = false; S.draft = null; S.text = ""; S.sel = null;
     save(); render();
@@ -283,7 +348,7 @@
     return `<li class="row" tabindex="0" data-rpick="${s.id}"><span class="num">${s.id}</span><span class="t">${esc(s.text)} <span class="small mute">· ${esc(s.place)}</span>${extra || ""}${bars(st)}</span></li>`;
   }
   function places(g) {
-    return A.distinctive[g].filter(d => d.dir === 1).map(d => D.statements[d.index].place);
+    return A.distinctive[g].filter(d => d.dir === 1 && shapeOf(D.statements[d.index]).type !== "wide").map(d => D.statements[d.index].place);
   }
 
   function report() {
@@ -342,8 +407,8 @@
     return `<section><h2>How it works</h2>
       <p>PlaceVote joins two things that usually live apart: a map where residents say what should change and where (participatory GIS), and the pol.is method for finding consensus across a large group.</p>
       <ol class="steps">
-        <li><b>Drop ideas on the map.</b> Residents pin a short idea to a place.</li>
-        <li><b>Merge overlapping ideas.</b> Hundreds of scattered pins can't be voted on fairly, so similar ideas in similar places are merged into one clear statement. This demo matches on shared wording and distance. The full version uses an AI model to write the merged statement, with a person checking it.</li>
+        <li><b>Share ideas on the map.</b> Residents pin an idea to a spot, draw it along a route, mark out an area, or add a whole-area idea that covers the neighbourhood, such as a policy or how the Board works.</li>
+        <li><b>Merge overlapping ideas.</b> Hundreds of scattered pins can't be voted on fairly, so similar ideas in similar places are merged into one clear statement. This demo matches on shared wording and the distance between shapes; whole-area ideas are matched with each other. The full version uses an AI model to write the merged statement, with a person checking it.</li>
         <li><b>Everyone votes on the same list.</b> Agree, disagree or unsure. Because everyone sees the same statements, the votes can be compared.</li>
         <li><b>Find opinion groups.</b> The vote table is compressed to two dimensions (principal component analysis) and grouped with k-means. The number of groups is chosen by silhouette score, as pol.is does.</li>
         <li><b>Find common ground.</b> A statement counts as common ground only if <i>every</i> group tends to agree, so a large group can't outvote a small one.</li>
@@ -377,16 +442,23 @@
   $("#panel").addEventListener("change", e => { if (e.target.id === "cat") S.cat = e.target.value; });
 
   $("#panel").addEventListener("click", e => {
-    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-view]"); if (!t) return;
+    const t = e.target.closest("[data-act],[data-vote],[data-pick],[data-votepick],[data-rpick],[data-view],[data-mode]"); if (!t) return;
     const d = t.dataset;
     if (d.vote !== undefined) return castVote(+d.vote);
     if (d.pick) { S.sel = +d.pick; S.outcome = null; render(); return; }
     if (d.votepick) { S.voteId = +d.votepick; render(); return; }
     if (d.rpick) { S.sel = S.sel === +d.rpick ? null : +d.rpick; drawPins(); return; }
     if (d.view !== undefined) { S.view = +d.view; render(); return; }
+    if (d.mode) {
+      const keep = S.draft.pts, t = d.mode;
+      S.draft = { type: t, pts: t === "wide" ? [] : t === "point" ? keep.slice(0, 1) : keep.slice() };
+      render();
+      if (t !== "wide" && window.innerWidth <= 860 && !S.draft.pts.length) map.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     switch (d.act) {
       case "add":
-        S.adding = true; S.draft = null; S.sel = null; S.outcome = null; render();
+        S.adding = true; S.draft = { type: "point", pts: [] }; S.sel = null; S.outcome = null; render();
         if (window.innerWidth <= 860) map.scrollIntoView({ behavior: "smooth", block: "start" });
         break;
       case "cancel": S.adding = false; S.draft = null; render(); break;

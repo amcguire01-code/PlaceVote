@@ -142,7 +142,7 @@ var PV_ENGINE = (function () {
     var best = null;
     for (var k = 2; k <= 4; k++) {
       var run = kmeans(pts, k, 11 + k), s = silhouette(pts, run.labels, k);
-      if (!best || s > best.score + 0.02) best = { k: k, labels: run.labels, cents: run.cents, score: s };
+      if (!best || s > best.score) best = { k: k, labels: run.labels, cents: run.cents, score: s };
     }
     return relabel(best, pts);
   }
@@ -240,7 +240,7 @@ var PV_ENGINE = (function () {
     kids: "young", teenagers: "young", teens: "young", youth: "young", children: "young",
     homes: "housing", houses: "housing", flats: "housing", home: "housing",
     doctor: "gp", doctors: "gp", surgery: "gp", appointment: "gp", appointments: "gp",
-    park: "green", garden: "green", gardens: "green", allotment: "green", allotments: "green",
+    garden: "green", gardens: "green", allotment: "green", allotments: "green",
     speed: "speeding", speeds: "speeding", fast: "speeding", "20mph": "speeding",
     unsafe: "safety", safe: "safety", scary: "safety", crime: "safety", cctv: "safety", cameras: "safety",
     canal: "towpath", path: "towpath"
@@ -262,15 +262,82 @@ var PV_ENGINE = (function () {
     return na && nb ? dot / Math.sqrt(na * nb) : 0;
   }
 
-  // statements: [{id, x, y, text, sources:[text...]}]
-  // Returns ranked matches and a decision: merge into best match, or create a new statement.
+  // ---------- shapes ----------
+  // A shape is {type: "point"|"line"|"area"|"wide", pts: [[x, y], ...]}.
+  // Statements without a shape are points at (x, y).
+  function shapeOf(s) {
+    if (s.geom && s.geom.type === "wide") return { type: "wide", pts: [] };
+    if (s.geom && s.geom.pts && s.geom.pts.length) return s.geom;
+    if (s.x === null || s.x === undefined) return { type: "wide", pts: [] };
+    return { type: "point", pts: [[s.x, s.y]] };
+  }
+  // Points along the shape every ~20 map units, so distances work for routes and outlines.
+  function samples(g) {
+    var pts = g.pts.slice(), out = [];
+    if (g.type === "area") pts.push(pts[0]);
+    if (pts.length === 1) return pts;
+    for (var i = 0; i < pts.length - 1; i++) {
+      var a = pts[i], b = pts[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(len / 20));
+      for (var k = 0; k < n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+  function inside(p, poly) {
+    var c = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var a = poly[i], b = poly[j];
+      if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  // Shortest distance between two shapes (0 if one is inside an area). null if either is whole-area.
+  function shapeDistance(g1, g2) {
+    if (g1.type === "wide" || g2.type === "wide") return null;
+    var s1 = samples(g1), s2 = samples(g2), i, j, best = Infinity;
+    if (g1.type === "area") for (i = 0; i < s2.length; i++) if (inside(s2[i], g1.pts)) return 0;
+    if (g2.type === "area") for (i = 0; i < s1.length; i++) if (inside(s1[i], g2.pts)) return 0;
+    var e1 = edges(g1), e2 = edges(g2);
+    for (i = 0; i < s1.length; i++) for (j = 0; j < e2.length; j++) best = Math.min(best, segDist(s1[i], e2[j][0], e2[j][1]));
+    for (i = 0; i < s2.length; i++) for (j = 0; j < e1.length; j++) best = Math.min(best, segDist(s2[i], e1[j][0], e1[j][1]));
+    return best;
+  }
+  function edges(g) {
+    var pts = g.pts.slice(), out = [];
+    if (g.type === "area") pts.push(pts[0]);
+    if (pts.length === 1) return [[pts[0], pts[0]]];
+    for (var i = 0; i < pts.length - 1; i++) out.push([pts[i], pts[i + 1]]);
+    return out;
+  }
+  // Exact distance from point p to the segment a-b.
+  function segDist(p, a, b) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
+    var t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0;
+    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+  }
+  // Where to put a shape's pin: the point, the middle of a route, or the middle of an area.
+  function anchor(g) {
+    if (g.type === "wide" || !g.pts.length) return null;
+    if (g.type === "point") return g.pts[0].slice();
+    if (g.type === "area") {
+      var sx = 0, sy = 0; g.pts.forEach(function (p) { sx += p[0]; sy += p[1]; });
+      return [Math.round(sx / g.pts.length), Math.round(sy / g.pts.length)];
+    }
+    var s = samples(g); return s[Math.floor(s.length / 2)].map(Math.round);
+  }
+
+  // ---------- consolidation of new contributions (offline version) ----------
+  // contrib: {geom or x/y, text}. statements: [{id, x, y, geom, text, sources:[text...]}]
+  // Score = 65% shared wording + 35% closeness on the map.
+  // Whole-area ideas count as "close" only to other whole-area ideas, so a whole-area idea
+  // only joins a place-based statement (or vice versa) if the wording is very similar.
   function consolidate(contrib, statements) {
-    var cb = bag(tokens(contrib.text));
+    var cb = bag(tokens(contrib.text)), cg = shapeOf(contrib);
     var ranked = statements.map(function (s) {
       var sb = bag(tokens([s.text].concat(s.sources || []).join(" ")));
-      var text = cosine(cb, sb);
-      var d = Math.sqrt((s.x - contrib.x) * (s.x - contrib.x) + (s.y - contrib.y) * (s.y - contrib.y));
-      var near = Math.exp(-d / 140);
+      var text = cosine(cb, sb), sg = shapeOf(s), d = shapeDistance(cg, sg), near;
+      if (d === null) near = (cg.type === "wide" && sg.type === "wide") ? 0.6 : 0;
+      else near = Math.exp(-d / 140);
       return { id: s.id, text: text, near: near, score: 0.65 * text + 0.35 * near };
     }).sort(function (a, b) { return b.score - a.score; });
     var top = ranked[0];
@@ -306,7 +373,7 @@ var PV_ENGINE = (function () {
   return {
     rng: rng, simulate: simulate, pca: pca, project: project, kmeans: kmeans, silhouette: silhouette,
     cluster: cluster, stats: stats, analyse: analyse, nearestGroup: nearestGroup,
-    tokens: tokens, consolidate: consolidate, tidy: tidy, moderate: moderate
+    tokens: tokens, consolidate: consolidate, shapeOf: shapeOf, shapeDistance: shapeDistance, anchor: anchor, tidy: tidy, moderate: moderate
   };
 })();
 
